@@ -1,0 +1,1886 @@
+openapi: 3.0.3
+info:
+  title: PersonalCRM API
+  version: 1.0.0
+  description: |
+    PersonalCRM v1 API for managing contacts, interactions, introductions, reminders,
+    strategy/wheel, projects, and RBAC in a cloud workspace with assistant access.
+
+    Notes:
+    - All requests are scoped to a workspace.
+    - Field-level privacy is enforced server-side; assistants may receive redacted fields.
+    - Use cursor-based pagination (next_cursor).
+servers:
+  - url: https://api.personalcrm.example.com
+    description: Production (replace)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+  - name: Contacts
+  - name: Organizations
+  - name: Interactions
+  - name: Introductions
+  - name: Reminders
+  - name: Strategy
+  - name: Projects
+  - name: RBAC
+  - name: Audit
+
+paths:
+  /api/v1/me:
+    get:
+      tags: [Auth]
+      summary: Get current user context
+      operationId: getMe
+      responses:
+        '200':
+          description: Current user and workspace context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/workspaces:
+    get:
+      tags: [RBAC]
+      summary: List workspaces available to the user
+      operationId: listWorkspaces
+      responses:
+        '200':
+          description: Workspaces
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Workspace'
+                required: [data]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/workspaces/{workspace_id}/members:
+    get:
+      tags: [RBAC]
+      summary: List workspace members
+      operationId: listWorkspaceMembers
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdPath'
+      responses:
+        '200':
+          description: Members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkspaceMember'
+                required: [data]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [RBAC]
+      summary: Invite/add a workspace member
+      operationId: createWorkspaceMember
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceMemberCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceMember'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/workspaces/{workspace_id}/members/{user_id}:
+    patch:
+      tags: [RBAC]
+      summary: Update member role/status
+      operationId: updateWorkspaceMember
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdPath'
+        - $ref: '#/components/parameters/UserIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceMemberUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceMember'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/rbac/roles:
+    get:
+      tags: [RBAC]
+      summary: List workspace roles
+      operationId: listRoles
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      responses:
+        '200':
+          description: Roles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Role'
+                required: [data]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [RBAC]
+      summary: Create a role
+      operationId: createRole
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/rbac/roles/{role_id}:
+    patch:
+      tags: [RBAC]
+      summary: Update a role
+      operationId: updateRole
+      parameters:
+        - $ref: '#/components/parameters/RoleIdPath'
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [RBAC]
+      summary: Delete a role
+      operationId: deleteRole
+      parameters:
+        - $ref: '#/components/parameters/RoleIdPath'
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/rbac/permissions:
+    get:
+      tags: [RBAC]
+      summary: List known permissions
+      operationId: listPermissions
+      responses:
+        '200':
+          description: Permissions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Permission'
+                required: [data]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/organizations:
+    get:
+      tags: [Organizations]
+      summary: List organizations
+      operationId: listOrganizations
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Search by name
+      responses:
+        '200':
+          description: Organizations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedOrganizations'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Organizations]
+      summary: Create an organization
+      operationId: createOrganization
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/contacts:
+    get:
+      tags: [Contacts]
+      summary: List contacts
+      operationId: listContacts
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Full-text search across name, org, title, shared notes
+        - name: tags
+          in: query
+          schema:
+            type: array
+            items: { type: string }
+          style: form
+          explode: true
+          description: Filter by tags (OR semantics)
+        - name: tier
+          in: query
+          schema:
+            $ref: '#/components/schemas/TieStrength'
+          description: Filter by tie strength (close/medium/weak)
+        - name: visibility
+          in: query
+          schema:
+            $ref: '#/components/schemas/Visibility'
+          description: Filter by record visibility
+        - name: updated_since
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Return contacts updated after this timestamp
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [updated_desc, last_interaction_desc, name_asc]
+          description: Sort option
+      responses:
+        '200':
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedContacts'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Contacts]
+      summary: Create a contact
+      operationId: createContact
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/contacts/{contact_id}:
+    get:
+      tags: [Contacts]
+      summary: Get a contact
+      operationId: getContact
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/ContactIdPath'
+      responses:
+        '200':
+          description: Contact
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [Contacts]
+      summary: Update a contact
+      operationId: updateContact
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/ContactIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [Contacts]
+      summary: Delete a contact
+      operationId: deleteContact
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/ContactIdPath'
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/contacts/{contact_id}/interactions:
+    get:
+      tags: [Interactions]
+      summary: List interactions for a contact
+      operationId: listContactInteractions
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/ContactIdPath'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: type
+          in: query
+          schema:
+            $ref: '#/components/schemas/InteractionType'
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Interactions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedInteractions'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    post:
+      tags: [Interactions]
+      summary: Create an interaction for a contact
+      operationId: createContactInteraction
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/ContactIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InteractionCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Interaction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/interactions/{interaction_id}:
+    get:
+      tags: [Interactions]
+      summary: Get an interaction
+      operationId: getInteraction
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/InteractionIdPath'
+      responses:
+        '200':
+          description: Interaction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Interaction'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [Interactions]
+      summary: Update an interaction
+      operationId: updateInteraction
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/InteractionIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InteractionUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Interaction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [Interactions]
+      summary: Delete an interaction
+      operationId: deleteInteraction
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/InteractionIdPath'
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/introductions:
+    get:
+      tags: [Introductions]
+      summary: List introductions
+      operationId: listIntroductions
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/IntroductionStatus'
+        - name: contact_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/UUID'
+          description: Filter by a participant contact id
+      responses:
+        '200':
+          description: Introductions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedIntroductions'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Introductions]
+      summary: Create an introduction workflow
+      operationId: createIntroduction
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntroductionCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Introduction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/introductions/{introduction_id}:
+    get:
+      tags: [Introductions]
+      summary: Get an introduction
+      operationId: getIntroduction
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/IntroductionIdPath'
+      responses:
+        '200':
+          description: Introduction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Introduction'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [Introductions]
+      summary: Update an introduction
+      operationId: updateIntroduction
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/IntroductionIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntroductionUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Introduction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/reminders:
+    get:
+      tags: [Reminders]
+      summary: List reminders
+      operationId: listReminders
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ReminderStatus'
+        - name: due_from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: due_to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: contact_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/UUID'
+      responses:
+        '200':
+          description: Reminders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedReminders'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Reminders]
+      summary: Create a reminder
+      operationId: createReminder
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReminderCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reminder'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/reminders/{reminder_id}:
+    patch:
+      tags: [Reminders]
+      summary: Update a reminder
+      operationId: updateReminder
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/ReminderIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReminderUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reminder'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/strategy:
+    get:
+      tags: [Strategy]
+      summary: Get workspace strategy
+      operationId: getStrategy
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      responses:
+        '200':
+          description: Strategy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Strategy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    put:
+      tags: [Strategy]
+      summary: Upsert workspace strategy
+      operationId: upsertStrategy
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StrategyUpsert'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Strategy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/strategy/wheel:
+    get:
+      tags: [Strategy]
+      summary: Get wheel-of-environment segments
+      operationId: getStrategyWheel
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      responses:
+        '200':
+          description: Wheel
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WheelSegment'
+                required: [data]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    put:
+      tags: [Strategy]
+      summary: Replace all wheel segments
+      operationId: putStrategyWheel
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/WheelSegmentUpsert'
+              required: [data]
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WheelSegment'
+                required: [data]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      operationId: listProjects
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Search by name/description
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ProjectStatus'
+      responses:
+        '200':
+          description: Projects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedProjects'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Projects]
+      summary: Create a project
+      operationId: createProject
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/projects/{project_id}:
+    get:
+      tags: [Projects]
+      summary: Get a project
+      operationId: getProject
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/ProjectIdPath'
+      responses:
+        '200':
+          description: Project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [Projects]
+      summary: Update a project
+      operationId: updateProject
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/ProjectIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [Projects]
+      summary: Delete a project
+      operationId: deleteProject
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/ProjectIdPath'
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/audit:
+    get:
+      tags: [Audit]
+      summary: List audit log events (Owner only)
+      operationId: listAudit
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: entity_type
+          in: query
+          schema:
+            type: string
+            enum: [contact, interaction, introduction, reminder, project, member, role]
+        - name: entity_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/UUID'
+      responses:
+        '200':
+          description: Audit events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAuditEvents'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    WorkspaceIdQuery:
+      name: workspace_id
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+      description: Workspace scope for the request
+
+    WorkspaceIdPath:
+      name: workspace_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+
+    UserIdPath:
+      name: user_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+
+    RoleIdPath:
+      name: role_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+
+    ContactIdPath:
+      name: contact_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+
+    InteractionIdPath:
+      name: interaction_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+
+    IntroductionIdPath:
+      name: introduction_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+
+    ReminderIdPath:
+      name: reminder_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+
+    ProjectIdPath:
+      name: project_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Opaque pagination cursor
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    UUID:
+      type: string
+      format: uuid
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+          required: [code, message]
+      required: [error]
+
+    Visibility:
+      type: string
+      enum: [private, shared, limited]
+      description: |
+        Record visibility.
+        - private: only Owner (and roles with private access)
+        - shared: Owner + Assistant
+        - limited: Assistant can see a redacted subset
+
+    TieStrength:
+      type: string
+      enum: [close, medium, weak]
+
+    InteractionType:
+      type: string
+      enum: [meeting, call, message, event, intro, help_given, help_received, note]
+
+    InteractionChannel:
+      type: string
+      enum: [in_person, phone, video, email, telegram, whatsapp, other]
+
+    IntroductionStatus:
+      type: string
+      enum: [requested, approved_a, approved_b, sent, met, completed, canceled]
+
+    ReminderType:
+      type: string
+      enum: [follow_up, birthday, anniversary, task, custom]
+
+    ReminderStatus:
+      type: string
+      enum: [open, done, canceled]
+
+    ProjectStatus:
+      type: string
+      enum: [idea, active, on_hold, completed, canceled]
+
+    Workspace:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+      required: [id, name, created_at]
+
+    WorkspaceMember:
+      type: object
+      properties:
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        user_id: { $ref: '#/components/schemas/UUID' }
+        email: { type: string, format: email }
+        display_name: { type: string }
+        membership_role:
+          type: string
+          enum: [owner, assistant, collaborator]
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+      required: [workspace_id, user_id, membership_role, is_active, created_at]
+
+    WorkspaceMemberCreate:
+      type: object
+      properties:
+        email: { type: string, format: email }
+        membership_role:
+          type: string
+          enum: [assistant, collaborator]
+      required: [email, membership_role]
+
+    WorkspaceMemberUpdate:
+      type: object
+      properties:
+        membership_role:
+          type: string
+          enum: [owner, assistant, collaborator]
+        is_active: { type: boolean }
+
+    Permission:
+      type: object
+      properties:
+        key: { type: string }
+        description: { type: string }
+      required: [key]
+
+    Role:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        name: { type: string }
+        description: { type: string }
+        permission_keys:
+          type: array
+          items: { type: string }
+      required: [id, workspace_id, name, permission_keys]
+
+    RoleCreate:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        permission_keys:
+          type: array
+          items: { type: string }
+      required: [name, permission_keys]
+
+    RoleUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        permission_keys:
+          type: array
+          items: { type: string }
+
+    Organization:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        name: { type: string }
+        website: { type: string }
+        industries:
+          type: array
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [id, workspace_id, name, created_at, updated_at]
+
+    OrganizationCreate:
+      type: object
+      properties:
+        name: { type: string }
+        website: { type: string }
+        industries:
+          type: array
+          items: { type: string }
+      required: [name]
+
+    Contact:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        visibility: { $ref: '#/components/schemas/Visibility' }
+
+        first_name: { type: string }
+        last_name: { type: string }
+        middle_name: { type: string }
+        display_name: { type: string }
+        photo_url: { type: string }
+
+        emails:
+          type: array
+          items: { type: string, format: email }
+        phones:
+          type: array
+          items: { type: string }
+        messengers:
+          type: object
+          additionalProperties: { type: string }
+          description: Map of messenger name -> handle
+
+        city: { type: string }
+        timezone: { type: string }
+        birthday: { type: string, format: date }
+
+        organization:
+          nullable: true
+          $ref: '#/components/schemas/Organization'
+        job_title: { type: string }
+        industries:
+          type: array
+          items: { type: string }
+        competencies:
+          type: array
+          items: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+
+        tie_strength: { $ref: '#/components/schemas/TieStrength' }
+
+        trust_score:
+          type: integer
+          minimum: 1
+          maximum: 10
+          nullable: true
+          description: May be redacted for assistants depending on privacy
+        emotional_balance:
+          type: number
+          format: double
+          nullable: true
+          description: May be redacted for assistants depending on privacy
+
+        how_can_help:
+          type: array
+          items: { type: string }
+        how_i_can_help:
+          type: array
+          items: { type: string }
+
+        met_context:
+          type: string
+          description: Where/how you met
+        shared_notes:
+          type: string
+        private_notes:
+          type: string
+          description: Owner-only notes (may be null/redacted)
+
+        last_interaction_at: { type: string, format: date-time, nullable: true }
+        next_touch_at: { type: string, format: date-time, nullable: true }
+
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required:
+        - id
+        - workspace_id
+        - visibility
+        - display_name
+        - tie_strength
+        - created_at
+        - updated_at
+
+    ContactCreate:
+      type: object
+      properties:
+        visibility: { $ref: '#/components/schemas/Visibility' }
+        first_name: { type: string }
+        last_name: { type: string }
+        middle_name: { type: string }
+        display_name: { type: string }
+        photo_url: { type: string }
+        emails:
+          type: array
+          items: { type: string, format: email }
+        phones:
+          type: array
+          items: { type: string }
+        messengers:
+          type: object
+          additionalProperties: { type: string }
+        city: { type: string }
+        timezone: { type: string }
+        birthday: { type: string, format: date }
+        organization_id: { $ref: '#/components/schemas/UUID' }
+        job_title: { type: string }
+        industries:
+          type: array
+          items: { type: string }
+        competencies:
+          type: array
+          items: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        tie_strength: { $ref: '#/components/schemas/TieStrength' }
+        trust_score:
+          type: integer
+          minimum: 1
+          maximum: 10
+          nullable: true
+        emotional_balance:
+          type: number
+          format: double
+          nullable: true
+        how_can_help:
+          type: array
+          items: { type: string }
+        how_i_can_help:
+          type: array
+          items: { type: string }
+        met_context: { type: string }
+        shared_notes: { type: string }
+        private_notes: { type: string }
+        next_touch_at: { type: string, format: date-time }
+      required: [display_name, tie_strength]
+
+    ContactUpdate:
+      type: object
+      properties:
+        visibility: { $ref: '#/components/schemas/Visibility' }
+        first_name: { type: string }
+        last_name: { type: string }
+        middle_name: { type: string }
+        display_name: { type: string }
+        photo_url: { type: string }
+        emails:
+          type: array
+          items: { type: string, format: email }
+        phones:
+          type: array
+          items: { type: string }
+        messengers:
+          type: object
+          additionalProperties: { type: string }
+        city: { type: string }
+        timezone: { type: string }
+        birthday: { type: string, format: date }
+        organization_id: { $ref: '#/components/schemas/UUID' }
+        job_title: { type: string }
+        industries:
+          type: array
+          items: { type: string }
+        competencies:
+          type: array
+          items: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        tie_strength: { $ref: '#/components/schemas/TieStrength' }
+        trust_score:
+          type: integer
+          minimum: 1
+          maximum: 10
+          nullable: true
+        emotional_balance:
+          type: number
+          format: double
+          nullable: true
+        how_can_help:
+          type: array
+          items: { type: string }
+        how_i_can_help:
+          type: array
+          items: { type: string }
+        met_context: { type: string }
+        shared_notes: { type: string }
+        private_notes: { type: string }
+        next_touch_at: { type: string, format: date-time }
+
+    Interaction:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        contact_id: { $ref: '#/components/schemas/UUID' }
+        visibility: { $ref: '#/components/schemas/Visibility' }
+        type: { $ref: '#/components/schemas/InteractionType' }
+        channel: { $ref: '#/components/schemas/InteractionChannel' }
+        occurred_at: { type: string, format: date-time }
+        summary: { type: string }
+        outcome: { type: string }
+        next_action: { type: string }
+        next_action_at: { type: string, format: date-time, nullable: true }
+        created_by_user_id: { $ref: '#/components/schemas/UUID' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [id, workspace_id, contact_id, type, occurred_at, created_at, updated_at]
+
+    InteractionCreate:
+      type: object
+      properties:
+        visibility: { $ref: '#/components/schemas/Visibility' }
+        type: { $ref: '#/components/schemas/InteractionType' }
+        channel: { $ref: '#/components/schemas/InteractionChannel' }
+        occurred_at: { type: string, format: date-time }
+        summary: { type: string }
+        outcome: { type: string }
+        next_action: { type: string }
+        next_action_at: { type: string, format: date-time }
+      required: [type, occurred_at]
+
+    InteractionUpdate:
+      type: object
+      properties:
+        visibility: { $ref: '#/components/schemas/Visibility' }
+        type: { $ref: '#/components/schemas/InteractionType' }
+        channel: { $ref: '#/components/schemas/InteractionChannel' }
+        occurred_at: { type: string, format: date-time }
+        summary: { type: string }
+        outcome: { type: string }
+        next_action: { type: string }
+        next_action_at: { type: string, format: date-time, nullable: true }
+
+    Introduction:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        status: { $ref: '#/components/schemas/IntroductionStatus' }
+
+        requester_contact_id: { $ref: '#/components/schemas/UUID' }
+        introducer_contact_id: { $ref: '#/components/schemas/UUID' }
+        target_contact_id: { $ref: '#/components/schemas/UUID' }
+
+        ask: { type: string }
+        benefit_for_requester: { type: string }
+        benefit_for_target: { type: string }
+
+        consent_requester: { type: boolean }
+        consent_target: { type: boolean }
+
+        sent_at: { type: string, format: date-time, nullable: true }
+        met_at: { type: string, format: date-time, nullable: true }
+        outcome: { type: string, nullable: true }
+
+        created_by_user_id: { $ref: '#/components/schemas/UUID' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required:
+        - id
+        - workspace_id
+        - status
+        - requester_contact_id
+        - introducer_contact_id
+        - target_contact_id
+        - ask
+        - created_at
+        - updated_at
+
+    IntroductionCreate:
+      type: object
+      properties:
+        requester_contact_id: { $ref: '#/components/schemas/UUID' }
+        introducer_contact_id: { $ref: '#/components/schemas/UUID' }
+        target_contact_id: { $ref: '#/components/schemas/UUID' }
+        ask: { type: string }
+        benefit_for_requester: { type: string }
+        benefit_for_target: { type: string }
+        consent_requester: { type: boolean, default: false }
+        consent_target: { type: boolean, default: false }
+        status: { $ref: '#/components/schemas/IntroductionStatus' }
+      required: [requester_contact_id, introducer_contact_id, target_contact_id, ask]
+
+    IntroductionUpdate:
+      type: object
+      properties:
+        status: { $ref: '#/components/schemas/IntroductionStatus' }
+        ask: { type: string }
+        benefit_for_requester: { type: string }
+        benefit_for_target: { type: string }
+        consent_requester: { type: boolean }
+        consent_target: { type: boolean }
+        sent_at: { type: string, format: date-time, nullable: true }
+        met_at: { type: string, format: date-time, nullable: true }
+        outcome: { type: string, nullable: true }
+
+    Reminder:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        contact_id: { $ref: '#/components/schemas/UUID', nullable: true }
+        project_id: { $ref: '#/components/schemas/UUID', nullable: true }
+        type: { $ref: '#/components/schemas/ReminderType' }
+        status: { $ref: '#/components/schemas/ReminderStatus' }
+        title: { type: string }
+        body: { type: string }
+        due_at: { type: string, format: date-time }
+        assigned_to_user_id: { $ref: '#/components/schemas/UUID', nullable: true }
+        created_by_user_id: { $ref: '#/components/schemas/UUID' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [id, workspace_id, type, status, due_at, created_at, updated_at]
+
+    ReminderCreate:
+      type: object
+      properties:
+        contact_id: { $ref: '#/components/schemas/UUID' }
+        project_id: { $ref: '#/components/schemas/UUID' }
+        type: { $ref: '#/components/schemas/ReminderType' }
+        title: { type: string }
+        body: { type: string }
+        due_at: { type: string, format: date-time }
+        assigned_to_user_id: { $ref: '#/components/schemas/UUID' }
+      required: [type, due_at]
+
+    ReminderUpdate:
+      type: object
+      properties:
+        status: { $ref: '#/components/schemas/ReminderStatus' }
+        title: { type: string }
+        body: { type: string }
+        due_at: { type: string, format: date-time }
+        assigned_to_user_id: { $ref: '#/components/schemas/UUID', nullable: true }
+
+    Strategy:
+      type: object
+      properties:
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        vision: { type: string }
+        goals:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        swot:
+          type: object
+          additionalProperties: true
+        roadmap:
+          type: object
+          additionalProperties: true
+        updated_at: { type: string, format: date-time }
+      required: [workspace_id, updated_at]
+
+    StrategyUpsert:
+      type: object
+      properties:
+        vision: { type: string }
+        goals:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        swot:
+          type: object
+          additionalProperties: true
+        roadmap:
+          type: object
+          additionalProperties: true
+
+    WheelSegment:
+      type: object
+      properties:
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        key:
+          type: string
+          description: Segment identifier (e.g., health, family, career...)
+        current:
+          type: integer
+          minimum: 0
+          maximum: 10
+        target:
+          type: integer
+          minimum: 0
+          maximum: 10
+        notes: { type: string }
+        updated_at: { type: string, format: date-time }
+      required: [workspace_id, key, current, target, updated_at]
+
+    WheelSegmentUpsert:
+      type: object
+      properties:
+        key: { type: string }
+        current:
+          type: integer
+          minimum: 0
+          maximum: 10
+        target:
+          type: integer
+          minimum: 0
+          maximum: 10
+        notes: { type: string }
+      required: [key, current, target]
+
+    Project:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        visibility: { $ref: '#/components/schemas/Visibility' }
+        name: { type: string }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/ProjectStatus' }
+        start_date: { type: string, format: date, nullable: true }
+        end_date: { type: string, format: date, nullable: true }
+        participant_contact_ids:
+          type: array
+          items: { $ref: '#/components/schemas/UUID' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [id, workspace_id, name, status, created_at, updated_at]
+
+    ProjectCreate:
+      type: object
+      properties:
+        visibility: { $ref: '#/components/schemas/Visibility' }
+        name: { type: string }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/ProjectStatus' }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        participant_contact_ids:
+          type: array
+          items: { $ref: '#/components/schemas/UUID' }
+      required: [name]
+
+    ProjectUpdate:
+      type: object
+      properties:
+        visibility: { $ref: '#/components/schemas/Visibility' }
+        name: { type: string }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/ProjectStatus' }
+        start_date: { type: string, format: date, nullable: true }
+        end_date: { type: string, format: date, nullable: true }
+        participant_contact_ids:
+          type: array
+          items: { $ref: '#/components/schemas/UUID' }
+
+    AuditEvent:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        actor_user_id: { $ref: '#/components/schemas/UUID' }
+        action_key: { type: string }
+        entity_type: { type: string }
+        entity_id: { $ref: '#/components/schemas/UUID' }
+        before:
+          type: object
+          additionalProperties: true
+        after:
+          type: object
+          additionalProperties: true
+        created_at: { type: string, format: date-time }
+      required: [id, workspace_id, actor_user_id, action_key, entity_type, entity_id, created_at]
+
+    MeResponse:
+      type: object
+      properties:
+        user:
+          type: object
+          properties:
+            id: { $ref: '#/components/schemas/UUID' }
+            email: { type: string, format: email }
+            display_name: { type: string }
+          required: [id, email]
+        workspaces:
+          type: array
+          items:
+            type: object
+            properties:
+              workspace: { $ref: '#/components/schemas/Workspace' }
+              membership: { $ref: '#/components/schemas/WorkspaceMember' }
+            required: [workspace, membership]
+      required: [user, workspaces]
+
+    PaginatedContacts:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Contact' }
+        next_cursor:
+          type: string
+          nullable: true
+      required: [data]
+
+    PaginatedOrganizations:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Organization' }
+        next_cursor:
+          type: string
+          nullable: true
+      required: [data]
+
+    PaginatedInteractions:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Interaction' }
+        next_cursor:
+          type: string
+          nullable: true
+      required: [data]
+
+    PaginatedIntroductions:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Introduction' }
+        next_cursor:
+          type: string
+          nullable: true
+      required: [data]
+
+    PaginatedReminders:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Reminder' }
+        next_cursor:
+          type: string
+          nullable: true
+      required: [data]
+
+    PaginatedProjects:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Project' }
+        next_cursor:
+          type: string
+          nullable: true
+      required: [data]
+
+    PaginatedAuditEvents:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/AuditEvent' }
+        next_cursor:
+          type: string
+          nullable: true
+      required: [data]

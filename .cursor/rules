@@ -1,0 +1,34 @@
+# PersonalCRM — Rules for Codex 5.2 (Cursor)
+
+## Source of truth
+1) OpenAPI contract: /openapi/personalcrm_openapi_v1.yaml
+2) Postgres schema: /db/personalcrm_postgres_schema_draft.sql
+
+Any change to endpoints or payloads MUST start by updating the contracts, then code.
+Never "invent" fields or endpoints that are not in the contracts.
+
+## Multi-tenancy
+- Every request is scoped by `workspace_id` (query param per OpenAPI).
+- All DB queries MUST filter by workspace_id AND deleted_at IS NULL unless explicitly needed.
+
+## Assistant access & privacy
+- Records have `visibility`: private/shared/limited.
+- Assistant must not see or edit private_notes, trust_score, emotional_balance, etc. unless they have explicit permission.
+- Implement server-side redaction (do not rely on frontend).
+
+## Soft delete
+- Delete operations set deleted_at; never physically delete in normal flows.
+
+## Pagination
+- Cursor-based pagination only (limit + cursor -> next_cursor).
+- Cursor must be opaque (base64 JSON), stable, and include tie-breaker fields.
+
+## Quality bar
+- Provide integration tests for each router: list/create/get/update/delete.
+- Add DB indexes ONLY if justified by actual query patterns.
+- Keep handlers thin; put logic in services.
+
+## Git discipline
+- One PR per epic.
+- Keep contract changes and implementation in the same PR.
+- Update README if developer workflow changes.
