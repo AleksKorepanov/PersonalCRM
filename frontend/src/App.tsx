@@ -1,17 +1,47 @@
 import React, { useEffect, useMemo, useState } from 'react'
 
 type MeResponse = {
-  user_id: string
-  email: string
-  display_name?: string | null
+  user: {
+    id: string
+    email: string
+    display_name?: string | null
+  }
+  workspaces: Array<{
+    workspace: {
+      id: string
+      name: string
+      created_at: string
+    }
+    membership: {
+      workspace_id: string
+      user_id: string
+      email?: string | null
+      display_name?: string | null
+      membership_role: string
+      is_active: boolean
+      created_at: string
+    }
+  }>
 }
 
 export default function App() {
   const apiBase = useMemo(() => import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000', [])
   const [me, setMe] = useState<MeResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'ok' | 'down'>('checking')
 
   useEffect(() => {
+    let isMounted = true
+    setBackendStatus('checking')
+    fetch(`${apiBase}/health`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Health check failed: ${r.status}`)
+        if (isMounted) setBackendStatus('ok')
+      })
+      .catch(() => {
+        if (isMounted) setBackendStatus('down')
+      })
+
     fetch(`${apiBase}/api/v1/me`)
       .then(async (r) => {
         if (!r.ok) throw new Error(await r.text())
@@ -19,6 +49,9 @@ export default function App() {
       })
       .then(setMe)
       .catch((e) => setError(String(e)))
+    return () => {
+      isMounted = false
+    }
   }, [apiBase])
 
   return (
@@ -37,6 +70,12 @@ export default function App() {
 
       <div style={{ marginTop: 16, color: '#666' }}>
         API Base URL: <code>{apiBase}</code>
+      </div>
+      <div style={{ marginTop: 8, color: '#666' }}>
+        Backend status:{' '}
+        <strong>
+          {backendStatus === 'checking' ? 'checking…' : backendStatus === 'ok' ? 'connected' : 'offline'}
+        </strong>
       </div>
     </div>
   )

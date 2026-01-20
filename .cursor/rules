@@ -1,34 +1,27 @@
-# PersonalCRM — Rules for Codex 5.2 (Cursor)
+# Cursor Rules for PersonalCRM (Codex 5.2)
 
-## Source of truth
-1) OpenAPI contract: /openapi/personalcrm_openapi_v1.yaml
-2) Postgres schema: /db/personalcrm_postgres_schema_draft.sql
+## Источник истины (contract-first)
+- API: openapi/personalcrm_openapi_v1.yaml
+- DB: db/personalcrm_postgres_schema_draft.sql
+- Любые изменения контрактов только явным коммитом и с описанием причины.
 
-Any change to endpoints or payloads MUST start by updating the contracts, then code.
-Never "invent" fields or endpoints that are not in the contracts.
+## Локализация
+- Интерфейс приложения (frontend) полностью на русском языке.
+- Тексты кнопок, заголовков, подсказок, ошибок и уведомлений — на русском.
 
-## Multi-tenancy
-- Every request is scoped by `workspace_id` (query param per OpenAPI).
-- All DB queries MUST filter by workspace_id AND deleted_at IS NULL unless explicitly needed.
+## Модель данных и безопасность
+- Multi-tenant: все данные привязаны к workspace.
+- RBAC: роли Owner и Assistant.
+- Приватность записи: private/shared/limited.
+- Soft delete: deleted_at.
+- Audit log: фиксировать создание/изменение/удаление для ключевых сущностей.
 
-## Assistant access & privacy
-- Records have `visibility`: private/shared/limited.
-- Assistant must not see or edit private_notes, trust_score, emotional_balance, etc. unless they have explicit permission.
-- Implement server-side redaction (do not rely on frontend).
+## Требования к разработке
+- Каждый шаг заканчивается проверкой: сборка, миграции, тесты.
+- Не продолжать работу, если предыдущий шаг не проходит без ошибок.
+- Сначала чинить ошибки, затем добавлять функциональность.
 
-## Soft delete
-- Delete operations set deleted_at; never physically delete in normal flows.
-
-## Pagination
-- Cursor-based pagination only (limit + cursor -> next_cursor).
-- Cursor must be opaque (base64 JSON), stable, and include tie-breaker fields.
-
-## Quality bar
-- Provide integration tests for each router: list/create/get/update/delete.
-- Add DB indexes ONLY if justified by actual query patterns.
-- Keep handlers thin; put logic in services.
-
-## Git discipline
-- One PR per epic.
-- Keep contract changes and implementation in the same PR.
-- Update README if developer workflow changes.
+## Проверки (минимум)
+- docker compose up --build
+- docker compose exec backend alembic upgrade head
+- docker compose exec backend pytest -q

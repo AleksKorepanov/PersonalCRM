@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Generator, Optional
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Query, Request
 
 from app.core.config import settings
 from app.core.security import UserPrincipal, decode_bearer_token, get_authorization_header
@@ -18,13 +18,13 @@ class WorkspaceContext:
 
 
 @contextmanager
-def db_conn(request) -> Generator:
+def db_conn(request: Request) -> Generator:
     pool = request.app.state.pool
     with pool.connection() as conn:
         yield conn
 
 
-async def get_db(request) -> Generator:
+async def get_db(request: Request) -> Generator:
     pool = request.app.state.pool
     with pool.connection() as conn:
         yield conn
@@ -49,7 +49,7 @@ def _get_or_create_dev_user(conn) -> UserPrincipal:
 
 
 async def get_current_user(
-    request,
+    request: Request,
     authorization: Optional[str] = Depends(get_authorization_header),
     conn=Depends(get_db),
 ) -> UserPrincipal:

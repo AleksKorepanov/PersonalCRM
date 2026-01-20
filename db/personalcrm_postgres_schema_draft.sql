@@ -84,39 +84,6 @@ AS $$
   SELECT nullif(current_setting('app.workspace_id', true), '')::uuid;
 $$;
 
--- Is current user an active member of the workspace?
-CREATE OR REPLACE FUNCTION app_is_workspace_member(wid uuid)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM workspace_memberships m
-    WHERE m.workspace_id = wid
-      AND m.user_id = app_current_user_id()
-      AND m.is_active = true
-      AND m.deleted_at IS NULL
-  );
-$$;
-
--- Does current membership have owner role?
-CREATE OR REPLACE FUNCTION app_is_owner(wid uuid)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM workspace_memberships m
-    WHERE m.workspace_id = wid
-      AND m.user_id = app_current_user_id()
-      AND m.is_active = true
-      AND m.role = 'owner'
-      AND m.deleted_at IS NULL
-  );
-$$;
-
 -- ------------------------------------------------------------
 -- Core tenancy: workspaces, users, memberships
 -- ------------------------------------------------------------
@@ -157,6 +124,39 @@ CREATE TABLE IF NOT EXISTS workspace_memberships (
 
 CREATE INDEX IF NOT EXISTS idx_memberships_user ON workspace_memberships(user_id);
 CREATE INDEX IF NOT EXISTS idx_memberships_role ON workspace_memberships(workspace_id, role);
+
+-- Is current user an active member of the workspace?
+CREATE OR REPLACE FUNCTION app_is_workspace_member(wid uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM workspace_memberships m
+    WHERE m.workspace_id = wid
+      AND m.user_id = app_current_user_id()
+      AND m.is_active = true
+      AND m.deleted_at IS NULL
+  );
+$$;
+
+-- Does current membership have owner role?
+CREATE OR REPLACE FUNCTION app_is_owner(wid uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM workspace_memberships m
+    WHERE m.workspace_id = wid
+      AND m.user_id = app_current_user_id()
+      AND m.is_active = true
+      AND m.role = 'owner'
+      AND m.deleted_at IS NULL
+  );
+$$;
 
 -- ------------------------------------------------------------
 -- RBAC (optional above/beyond membership_role)
@@ -309,7 +309,13 @@ CREATE TABLE IF NOT EXISTS contacts (
 
   -- Full-text search
   search_tsv             tsvector GENERATED ALWAYS AS (
-    setweight(to_tsvector('simple', coalesce(display_name,'')), 'A') ||
+    setweight(
+      to_tsvector(
+        'simple',
+        trim(both ' ' from coalesce(last_name,'') || ' ' || coalesce(first_name,'') || ' ' || coalesce(middle_name,''))
+      ),
+      'A'
+    ) ||
     setweight(to_tsvector('simple', coalesce(job_title,'')), 'B') ||
     setweight(to_tsvector('simple', coalesce(met_where,'')), 'C') ||
     setweight(to_tsvector('simple', coalesce(notes_shared,'')), 'D')
@@ -606,7 +612,7 @@ USING (
 
 DROP POLICY IF EXISTS contacts_write ON contacts;
 CREATE POLICY contacts_write ON contacts
-FOR INSERT, UPDATE, DELETE
+FOR ALL
 USING (
   contacts.workspace_id = app_current_workspace_id()
   AND app_is_workspace_member(contacts.workspace_id)
@@ -634,7 +640,7 @@ USING (
 
 DROP POLICY IF EXISTS interactions_write ON interactions;
 CREATE POLICY interactions_write ON interactions
-FOR INSERT, UPDATE, DELETE
+FOR ALL
 USING (
   interactions.workspace_id = app_current_workspace_id()
   AND app_is_workspace_member(interactions.workspace_id)
