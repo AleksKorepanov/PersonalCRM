@@ -7,23 +7,35 @@ from fastapi import HTTPException
 from app.core.deps import WorkspaceContext
 from app.core.security import UserPrincipal
 from app.schemas.projects import ProjectCreate, ProjectUpdate
+from app.services.audit import log_audit
+from app.services.mapping import PROJECT_STATUS_FROM_DB, PROJECT_STATUS_TO_DB
 from app.services.db import execute, execute_returning_one, fetchall, fetchone
 from app.utils.pagination import decode_cursor, encode_cursor
 
 
-def _row_to_project(row: Dict[str, Any]) -> Dict[str, Any]:
+def _row_to_project(row: Dict[str, Any], participant_ids: List[str]) -> Dict[str, Any]:
     return {
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
         "visibility": row.get("visibility") or "shared",
         "name": row.get("name"),
         "description": row.get("description"),
-        "status": row.get("status") or "idea",
+        "status": PROJECT_STATUS_FROM_DB.get(row.get("status"), "idea"),
         "start_date": row.get("start_date").isoformat() if row.get("start_date") else None,
         "end_date": row.get("end_date").isoformat() if row.get("end_date") else None,
+        "participant_contact_ids": participant_ids,
         "created_at": row.get("created_at").isoformat(),
         "updated_at": row.get("updated_at").isoformat(),
     }
+
+
+def _fetch_participant_ids(conn, project_id: str) -> List[str]:
+    rows = fetchall(
+        conn,
+        "SELECT contact_id FROM project_participants WHERE project_id = %s ORDER BY contact_id",
+        (project_id,),
+    )
+    return [str(r["contact_id"]) for r in rows]
 
 
 def list_projects(conn, ctx: WorkspaceContext, q: Optional[str] = None, status: Optional[str] = None, limit: int = 50, cursor: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
@@ -35,7 +47,7 @@ def list_projects(conn, ctx: WorkspaceContext, q: Optional[str] = None, status: 
 
     if status:
         where.append("status=%s")
-        params.append(status)
+        params.append(PROJECT_STATUS_TO_DB.get(status, status))
 
     if q:
         # Use tsvector if possible
@@ -51,7 +63,7 @@ def list_projects(conn, ctx: WorkspaceContext, q: Optional[str] = None, status: 
     params.append(limit)
 
     rows = fetchall(conn, sql, tuple(params))
-    items = [_row_to_project(r) for r in rows]
+    items = [_row_to_project(r, _fetch_participant_ids(conn, str(r["id"]))) for r in rows]
 
     next_cursor = None
     if len(rows) == limit:
@@ -73,7 +85,7 @@ def create_project(conn, ctx: WorkspaceContext, user: UserPrincipal, payload: Pr
             ctx.workspace_id,
             payload.name,
             payload.description,
-            payload.status.value if payload.status else "idea",
+            PROJECT_STATUS_TO_DB.get(payload.status.value if payload.status else "idea", "idea"),
             payload.visibility.value if payload.visibility else "shared",
             payload.start_date,
             payload.end_date,
@@ -81,21 +93,39 @@ def create_project(conn, ctx: WorkspaceContext, user: UserPrincipal, payload: Pr
             user.user_id,
         ),
     )
+    project_id = str(row["id"])
+    _set_participants(conn, project_id, payload.participant_contact_ids or [])
+    project = get_project(conn, ctx, project_id)
+    log_audit(conn, ctx, user, "project.create", "project", project_id, before=None, after=project)
     conn.commit()
-    return get_project(conn, ctx, str(row["id"]))
+    return project
 
 
 def get_project(conn, ctx: WorkspaceContext, project_id: str) -> Dict[str, Any]:
     row = fetchone(conn, "SELECT * FROM projects WHERE workspace_id=%s AND id=%s AND deleted_at IS NULL", (ctx.workspace_id, project_id))
     if not row:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Project not found"})
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Проект не найден"})
     if ctx.membership_role != "owner" and row.get("visibility") == "private":
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Private record"})
-    return _row_to_project(row)
+        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Запись приватная"})
+    participant_ids = _fetch_participant_ids(conn, project_id)
+    return _row_to_project(row, participant_ids)
+
+
+def _set_participants(conn, project_id: str, contact_ids: List[str]) -> None:
+    execute(conn, "DELETE FROM project_participants WHERE project_id = %s", (project_id,))
+    cleaned = [cid for cid in (contact_ids or []) if cid]
+    if not cleaned:
+        return
+    for contact_id in sorted(set(cleaned)):
+        execute(
+            conn,
+            "INSERT INTO project_participants(project_id, contact_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (project_id, contact_id),
+        )
 
 
 def update_project(conn, ctx: WorkspaceContext, user: UserPrincipal, project_id: str, payload: ProjectUpdate) -> Dict[str, Any]:
-    _ = get_project(conn, ctx, project_id)
+    before = get_project(conn, ctx, project_id)
 
     sets = []
     params: List[Any] = []
@@ -108,7 +138,8 @@ def update_project(conn, ctx: WorkspaceContext, user: UserPrincipal, project_id:
     set_if(payload.visibility.value if payload.visibility else None, "visibility")
     set_if(payload.name, "name")
     set_if(payload.description, "description")
-    set_if(payload.status.value if payload.status else None, "status")
+    if payload.status is not None:
+        set_if(PROJECT_STATUS_TO_DB.get(payload.status.value, payload.status.value), "status")
     set_if(payload.start_date, "start_date")
     set_if(payload.end_date, "end_date")
 
@@ -120,11 +151,16 @@ def update_project(conn, ctx: WorkspaceContext, user: UserPrincipal, project_id:
     params.extend([ctx.workspace_id, project_id])
 
     execute(conn, sql, tuple(params))
+    if payload.participant_contact_ids is not None:
+        _set_participants(conn, project_id, payload.participant_contact_ids)
+    after = get_project(conn, ctx, project_id)
+    log_audit(conn, ctx, user, "project.update", "project", project_id, before=before, after=after)
     conn.commit()
-    return get_project(conn, ctx, project_id)
+    return after
 
 
 def delete_project(conn, ctx: WorkspaceContext, user: UserPrincipal, project_id: str) -> None:
-    _ = get_project(conn, ctx, project_id)
+    before = get_project(conn, ctx, project_id)
     execute(conn, "UPDATE projects SET deleted_at=now(), updated_at=now(), updated_by=%s WHERE workspace_id=%s AND id=%s AND deleted_at IS NULL", (user.user_id, ctx.workspace_id, project_id))
+    log_audit(conn, ctx, user, "project.delete", "project", project_id, before=before, after={"deleted": True})
     conn.commit()

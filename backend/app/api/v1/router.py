@@ -1,8 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api.v1 import me, workspaces, organizations, contacts, interactions, introductions, reminders, strategy, projects, rbac, audit
+from app.core.deps import set_request_context
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter(prefix="/api/v1", dependencies=[Depends(set_request_context)])
 
 router.include_router(me.router, tags=["me"])
 router.include_router(workspaces.router, tags=["workspaces"])

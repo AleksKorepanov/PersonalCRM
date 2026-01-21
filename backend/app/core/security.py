@@ -23,7 +23,7 @@ def decode_bearer_token(authorization: Optional[str]) -> UserPrincipal:
     membership + permissions at the service layer.
     """
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Missing Bearer token"})
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Отсутствует Bearer токен"})
 
     token = authorization.split(" ", 1)[1].strip()
     try:
@@ -36,14 +36,14 @@ def decode_bearer_token(authorization: Optional[str]) -> UserPrincipal:
             options={"verify_sub": True},
         )
     except JWTError:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid token"})
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Неверный токен"})
 
     user_id = payload.get("sub")
     email = payload.get("email")
     display_name = payload.get("name")
 
     if not user_id or not email:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Token missing claims"})
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "В токене отсутствуют обязательные поля"})
 
     return UserPrincipal(user_id=str(user_id), email=str(email), display_name=str(display_name) if display_name else None)
 

@@ -9,6 +9,8 @@ class Settings(BaseSettings):
 
     auth_disabled: bool = True
     dev_user_email: str = "owner@local.dev"
+    dev_user_id: str = "00000000-0000-0000-0000-000000000001"
+    dev_workspace_id: str = "00000000-0000-0000-0000-000000000002"
 
     jwt_issuer: str = "personalcrm"
     jwt_audience: str = "personalcrm"

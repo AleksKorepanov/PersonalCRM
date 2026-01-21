@@ -2,73 +2,78 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.core.deps import get_db, get_current_user, require_permission
+from app.schemas.common import Paginated
+from app.schemas.enums import ProjectStatus
+from app.schemas.projects import Project, ProjectCreate, ProjectUpdate
+from app.services import projects as projects_svc
 
 router = APIRouter()
 
 
-@router.get("/projects")
+@router.get("/projects", response_model=Paginated[Project])
 def list_projects(
+    workspace_id: str = Query(..., alias="workspace_id"),
     q: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
+    status: Optional[ProjectStatus] = Query(None),
     limit: int = Query(50, ge=1, le=200),
+    cursor: Optional[str] = Query(None),
     conn=Depends(get_db),
     ctx=Depends(require_permission("projects.manage")),
 ):
-    params = [ctx.workspace_id]
-    where = ["workspace_id = %s", "deleted_at IS NULL"]
-    if status:
-        where.append("status = %s")
-        params.append(status)
-    if q:
-        where.append("search_tsv @@ plainto_tsquery('simple', %s)")
-        params.append(q)
-
-    sql = "SELECT id, workspace_id, visibility, name, description, status, start_date, end_date, created_at, updated_at FROM projects WHERE " + " AND ".join(where) + " ORDER BY updated_at DESC LIMIT %s"
-    params.append(limit)
-    rows = conn.execute(sql, tuple(params)).fetchall()
-
-    return [
-        {
-            "id": str(r[0]),
-            "workspace_id": str(r[1]),
-            "visibility": r[2],
-            "name": r[3],
-            "description": r[4],
-            "status": r[5],
-            "start_date": r[6].isoformat() if r[6] else None,
-            "end_date": r[7].isoformat() if r[7] else None,
-            "created_at": r[8].isoformat(),
-            "updated_at": r[9].isoformat(),
-        }
-        for r in rows
-    ]
+    items, next_cursor = projects_svc.list_projects(
+        conn,
+        ctx,
+        q=q,
+        status=status.value if status else None,
+        limit=limit,
+        cursor=cursor,
+    )
+    return {"data": items, "next_cursor": next_cursor}
 
 
-@router.post("/projects", status_code=201)
-def create_project(payload: dict, conn=Depends(get_db), user=Depends(get_current_user), ctx=Depends(require_permission("projects.manage"))):
-    name = (payload or {}).get("name")
-    if not name:
-        raise HTTPException(status_code=422, detail={"code": "VALIDATION_ERROR", "message": "name is required"})
-    row = conn.execute(
-        """
-        INSERT INTO projects(workspace_id, name, description, status, visibility, start_date, end_date, created_by, updated_by)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        RETURNING id, created_at, updated_at
-        """,
-        (
-            ctx.workspace_id,
-            name,
-            (payload or {}).get("description"),
-            (payload or {}).get("status", "idea"),
-            (payload or {}).get("visibility", "shared"),
-            (payload or {}).get("start_date"),
-            (payload or {}).get("end_date"),
-            user.user_id,
-            user.user_id,
-        ),
-    ).fetchone()
-    conn.commit()
-    return {"id": str(row[0]), "workspace_id": ctx.workspace_id, "name": name, "created_at": row[1].isoformat(), "updated_at": row[2].isoformat()}
+@router.post("/projects", status_code=201, response_model=Project)
+def create_project(
+    payload: ProjectCreate,
+    workspace_id: str = Query(..., alias="workspace_id"),
+    conn=Depends(get_db),
+    user=Depends(get_current_user),
+    ctx=Depends(require_permission("projects.manage")),
+):
+    return projects_svc.create_project(conn, ctx, user, payload)
+
+
+@router.get("/projects/{project_id}", response_model=Project)
+def get_project(
+    project_id: str,
+    workspace_id: str = Query(..., alias="workspace_id"),
+    conn=Depends(get_db),
+    ctx=Depends(require_permission("projects.manage")),
+):
+    return projects_svc.get_project(conn, ctx, project_id)
+
+
+@router.patch("/projects/{project_id}", response_model=Project)
+def patch_project(
+    project_id: str,
+    payload: ProjectUpdate,
+    workspace_id: str = Query(..., alias="workspace_id"),
+    conn=Depends(get_db),
+    user=Depends(get_current_user),
+    ctx=Depends(require_permission("projects.manage")),
+):
+    return projects_svc.update_project(conn, ctx, user, project_id, payload)
+
+
+@router.delete("/projects/{project_id}", status_code=204)
+def delete_project(
+    project_id: str,
+    workspace_id: str = Query(..., alias="workspace_id"),
+    conn=Depends(get_db),
+    user=Depends(get_current_user),
+    ctx=Depends(require_permission("projects.manage")),
+):
+    projects_svc.delete_project(conn, ctx, user, project_id)
+    return None

@@ -10,6 +10,7 @@ from app.core.deps import WorkspaceContext
 from app.schemas.contacts import Contact, ContactCreate, ContactUpdate
 from app.schemas.enums import Visibility
 from app.schemas.organizations import Organization
+from app.services.audit import log_audit
 from app.services.db import execute, execute_returning_one, fetchall, fetchone
 from app.utils.pagination import decode_cursor, encode_cursor, next_cursor_if_any
 
@@ -96,7 +97,7 @@ def _organization_from_joined(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def _row_to_contact(conn, row: Dict[str, Any], ctx: WorkspaceContext) -> Dict[str, Any]:
     # Visibility enforcement
     if ctx.membership_role != "owner" and row.get("visibility") == "private":
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Private record"})
+        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Запись приватная"})
 
     context = row.get("context") or {}
 
@@ -234,18 +235,24 @@ def list_contacts(
 
 
 def create_contact(conn, ctx: WorkspaceContext, user: UserPrincipal, payload: ContactCreate) -> Dict[str, Any]:
+    first_name = payload.first_name
+    last_name = payload.last_name
+    middle_name = payload.middle_name
+    if payload.display_name and not (first_name or last_name or middle_name):
+        first_name = payload.display_name
+
     row = execute_returning_one(
         conn,
         """
         INSERT INTO contacts(
-          workspace_id, visibility, first_name, last_name, middle_name, display_name, photo_url,
+          workspace_id, visibility, first_name, last_name, middle_name, photo_url,
           emails, phones, messengers, city, timezone, birthday,
           organization_id, job_title, industries, competencies,
           tie_strength, trust_score, emotional_balance,
           notes_shared, notes_private, met_where, next_touch_at,
           context, created_by, updated_by
         ) VALUES (
-          %s,%s,%s,%s,%s,%s,%s,
+          %s,%s,%s,%s,%s,%s,
           %s,%s,%s,%s,%s,%s,
           %s,%s,%s,%s,
           %s,%s,%s,
@@ -256,14 +263,13 @@ def create_contact(conn, ctx: WorkspaceContext, user: UserPrincipal, payload: Co
         (
             ctx.workspace_id,
             payload.visibility.value,
-            payload.first_name,
-            payload.last_name,
-            payload.middle_name,
-            payload.display_name,
+            first_name,
+            last_name,
+            middle_name,
             payload.photo_url,
-            payload.emails,
-            payload.phones,
-            payload.messengers,
+            json.dumps(payload.emails),
+            json.dumps(payload.phones),
+            json.dumps(payload.messengers),
             payload.city,
             payload.timezone,
             payload.birthday,
@@ -278,7 +284,7 @@ def create_contact(conn, ctx: WorkspaceContext, user: UserPrincipal, payload: Co
             payload.private_notes,
             payload.met_context,
             payload.next_touch_at,
-            {"how_can_help": payload.how_can_help, "how_i_can_help": payload.how_i_can_help},
+            json.dumps({"how_can_help": payload.how_can_help, "how_i_can_help": payload.how_i_can_help}),
             user.user_id,
             user.user_id,
         ),
@@ -286,8 +292,10 @@ def create_contact(conn, ctx: WorkspaceContext, user: UserPrincipal, payload: Co
 
     contact_id = str(row["id"])
     _set_contact_tags(conn, ctx.workspace_id, contact_id, payload.tags)
+    contact = get_contact(conn, ctx, contact_id)
+    log_audit(conn, ctx, user, "contact.create", "contact", contact_id, before=None, after=contact)
     conn.commit()
-    return get_contact(conn, ctx, contact_id)
+    return contact
 
 
 def get_contact(conn, ctx: WorkspaceContext, contact_id: str) -> Dict[str, Any]:
@@ -309,16 +317,21 @@ def get_contact(conn, ctx: WorkspaceContext, contact_id: str) -> Dict[str, Any]:
         (ctx.workspace_id, contact_id),
     )
     if not row:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Contact not found"})
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Контакт не найден"})
     return _row_to_contact(conn, row, ctx)
 
 
 def update_contact(conn, ctx: WorkspaceContext, user: UserPrincipal, contact_id: str, payload: ContactUpdate) -> Dict[str, Any]:
-    # Ensure exists and check visibility constraints
-    _ = get_contact(conn, ctx, contact_id)
+    before = get_contact(conn, ctx, contact_id)
 
     sets = []
     params: List[Any] = []
+    normalized_display_name = payload.display_name
+
+    if normalized_display_name and not (payload.first_name or payload.last_name or payload.middle_name):
+        payload.first_name = normalized_display_name
+        payload.last_name = None
+        payload.middle_name = None
 
     def set_if(name: str, value: Any, column: str):
         if value is not None:
@@ -329,12 +342,14 @@ def update_contact(conn, ctx: WorkspaceContext, user: UserPrincipal, contact_id:
     set_if("first_name", payload.first_name, "first_name")
     set_if("last_name", payload.last_name, "last_name")
     set_if("middle_name", payload.middle_name, "middle_name")
-    set_if("display_name", payload.display_name, "display_name")
     set_if("photo_url", payload.photo_url, "photo_url")
 
-    set_if("emails", payload.emails, "emails")
-    set_if("phones", payload.phones, "phones")
-    set_if("messengers", payload.messengers, "messengers")
+    if payload.emails is not None:
+        set_if("emails", json.dumps(payload.emails), "emails")
+    if payload.phones is not None:
+        set_if("phones", json.dumps(payload.phones), "phones")
+    if payload.messengers is not None:
+        set_if("messengers", json.dumps(payload.messengers), "messengers")
 
     set_if("city", payload.city, "city")
     set_if("timezone", payload.timezone, "timezone")
@@ -363,7 +378,7 @@ def update_contact(conn, ctx: WorkspaceContext, user: UserPrincipal, contact_id:
         if payload.how_i_can_help is not None:
             ctx_json["how_i_can_help"] = payload.how_i_can_help
         sets.append("context = %s")
-        params.append(ctx_json)
+        params.append(json.dumps(ctx_json))
 
     sets.append("updated_by = %s")
     params.append(user.user_id)
@@ -377,16 +392,18 @@ def update_contact(conn, ctx: WorkspaceContext, user: UserPrincipal, contact_id:
     if payload.tags is not None:
         _set_contact_tags(conn, ctx.workspace_id, contact_id, payload.tags)
 
+    after = get_contact(conn, ctx, contact_id)
+    log_audit(conn, ctx, user, "contact.update", "contact", contact_id, before=before, after=after)
     conn.commit()
-    return get_contact(conn, ctx, contact_id)
+    return after
 
 
 def delete_contact(conn, ctx: WorkspaceContext, user: UserPrincipal, contact_id: str) -> None:
-    # Ensure exists
-    _ = get_contact(conn, ctx, contact_id)
+    before = get_contact(conn, ctx, contact_id)
     execute(
         conn,
         "UPDATE contacts SET deleted_at = now(), updated_at = now(), updated_by = %s WHERE workspace_id = %s AND id = %s AND deleted_at IS NULL",
         (user.user_id, ctx.workspace_id, contact_id),
     )
+    log_audit(conn, ctx, user, "contact.delete", "contact", contact_id, before=before, after={"deleted": True})
     conn.commit()

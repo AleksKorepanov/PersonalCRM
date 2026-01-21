@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from app.core.deps import WorkspaceContext
 from app.core.security import UserPrincipal
 from app.schemas.reminders import ReminderCreate, ReminderUpdate
+from app.services.audit import log_audit
 from app.services.db import execute, execute_returning_one, fetchall, fetchone
 from app.services.mapping import REMINDER_STATUS_FROM_DB, REMINDER_STATUS_TO_DB, REMINDER_TYPE_FROM_DB, REMINDER_TYPE_TO_DB
 from app.utils.pagination import decode_cursor, encode_cursor
@@ -37,6 +38,7 @@ def list_reminders(
     cursor: Optional[str] = None,
     status: Optional[str] = None,
     due_before: Optional[str] = None,
+    due_after: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     params: List[Any] = [ctx.workspace_id]
     where = ["workspace_id = %s", "deleted_at IS NULL"]
@@ -48,6 +50,9 @@ def list_reminders(
     if due_before:
         where.append("due_at <= %s")
         params.append(due_before)
+    if due_after:
+        where.append("due_at >= %s")
+        params.append(due_after)
 
     if cursor:
         c = decode_cursor(cursor)
@@ -93,19 +98,21 @@ def create_reminder(conn, ctx: WorkspaceContext, user: UserPrincipal, payload: R
             user.user_id,
         ),
     )
+    reminder = get_reminder(conn, ctx, str(row["id"]))
+    log_audit(conn, ctx, user, "reminder.create", "reminder", reminder["id"], before=None, after=reminder)
     conn.commit()
-    return get_reminder(conn, ctx, str(row["id"]))
+    return reminder
 
 
 def get_reminder(conn, ctx: WorkspaceContext, reminder_id: str) -> Dict[str, Any]:
     row = fetchone(conn, "SELECT * FROM reminders WHERE workspace_id = %s AND id = %s AND deleted_at IS NULL", (ctx.workspace_id, reminder_id))
     if not row:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Reminder not found"})
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Напоминание не найдено"})
     return _row_to_reminder(row)
 
 
 def update_reminder(conn, ctx: WorkspaceContext, user: UserPrincipal, reminder_id: str, payload: ReminderUpdate) -> Dict[str, Any]:
-    _ = get_reminder(conn, ctx, reminder_id)
+    before = get_reminder(conn, ctx, reminder_id)
 
     sets = []
     params: List[Any] = []
@@ -134,11 +141,14 @@ def update_reminder(conn, ctx: WorkspaceContext, user: UserPrincipal, reminder_i
     sql = "UPDATE reminders SET " + ", ".join(sets) + " WHERE workspace_id = %s AND id = %s AND deleted_at IS NULL"
     params.extend([ctx.workspace_id, reminder_id])
     execute(conn, sql, tuple(params))
+    after = get_reminder(conn, ctx, reminder_id)
+    log_audit(conn, ctx, user, "reminder.update", "reminder", reminder_id, before=before, after=after)
     conn.commit()
-    return get_reminder(conn, ctx, reminder_id)
+    return after
 
 
 def delete_reminder(conn, ctx: WorkspaceContext, user: UserPrincipal, reminder_id: str) -> None:
-    _ = get_reminder(conn, ctx, reminder_id)
+    before = get_reminder(conn, ctx, reminder_id)
     execute(conn, "UPDATE reminders SET deleted_at = now(), updated_at = now(), updated_by = %s WHERE workspace_id = %s AND id = %s AND deleted_at IS NULL", (user.user_id, ctx.workspace_id, reminder_id))
+    log_audit(conn, ctx, user, "reminder.delete", "reminder", reminder_id, before=before, after={"deleted": True})
     conn.commit()

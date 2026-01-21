@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 from fastapi import HTTPException
 
 from app.core.deps import WorkspaceContext
 from app.core.security import UserPrincipal
 from app.schemas.introductions import IntroductionCreate, IntroductionUpdate
+from app.services.audit import log_audit
 from app.services.db import execute, execute_returning_one, fetchall, fetchone
 from app.services.mapping import INTRO_FROM_DB, INTRO_TO_DB
 from app.utils.pagination import decode_cursor, encode_cursor
@@ -34,7 +35,14 @@ def _row_to_intro(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def list_introductions(conn, ctx: WorkspaceContext, limit: int = 50, cursor: Optional[str] = None, status: Optional[str] = None):
+def list_introductions(
+    conn,
+    ctx: WorkspaceContext,
+    limit: int = 50,
+    cursor: Optional[str] = None,
+    status: Optional[str] = None,
+    contact_id: Optional[str] = None,
+):
     params: List[Any] = [ctx.workspace_id]
     where = ["workspace_id = %s", "deleted_at IS NULL"]
 
@@ -44,6 +52,12 @@ def list_introductions(conn, ctx: WorkspaceContext, limit: int = 50, cursor: Opt
     if status:
         where.append("status = %s")
         params.append(INTRO_TO_DB.get(status, status))
+
+    if contact_id:
+        where.append(
+            "(requester_contact_id = %s OR introducer_contact_id = %s OR target_contact_id = %s)"
+        )
+        params.extend([contact_id, contact_id, contact_id])
 
     if cursor:
         c = decode_cursor(cursor)
@@ -64,8 +78,70 @@ def list_introductions(conn, ctx: WorkspaceContext, limit: int = 50, cursor: Opt
     return data, next_cur
 
 
+def _get_intro_row(conn, ctx: WorkspaceContext, introduction_id: str) -> Dict[str, Any]:
+    row = fetchone(
+        conn,
+        "SELECT * FROM introductions WHERE workspace_id = %s AND id = %s AND deleted_at IS NULL",
+        (ctx.workspace_id, introduction_id),
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Интродукция не найдена"})
+    if ctx.membership_role != "owner" and row.get("visibility") == "private":
+        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Запись приватная"})
+    return row
+
+
+def _allowed_transitions() -> Dict[str, Set[str]]:
+    return {
+        "requested": {"approved_a", "approved_b", "canceled"},
+        "approved_a": {"approved_b", "sent", "canceled"},
+        "approved_b": {"approved_a", "sent", "canceled"},
+        "sent": {"met", "completed", "canceled"},
+        "met": {"completed", "canceled"},
+        "completed": set(),
+        "canceled": set(),
+    }
+
+
+def _validate_status_transition(
+    current_status: str,
+    next_status: str,
+    consent_requester: bool,
+    consent_target: bool,
+) -> None:
+    if next_status == current_status:
+        return
+
+    allowed = _allowed_transitions().get(current_status, set())
+    if next_status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "VALIDATION_ERROR",
+                "message": "Недопустимый переход статуса",
+                "details": {"from": current_status, "to": next_status},
+            },
+        )
+
+    if next_status == "sent" and not (consent_requester and consent_target):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "VALIDATION_ERROR",
+                "message": "Нельзя отправить интродукцию без согласия обеих сторон",
+            },
+        )
+
+
 def create_introduction(conn, ctx: WorkspaceContext, user: UserPrincipal, payload: IntroductionCreate) -> Dict[str, Any]:
-    status_db = INTRO_TO_DB.get(payload.status.value if payload.status else "requested", "requested")
+    status_api = payload.status.value if payload.status else "requested"
+    _validate_status_transition(
+        "requested",
+        status_api,
+        payload.consent_requester,
+        payload.consent_target,
+    )
+    status_db = INTRO_TO_DB.get(status_api, "requested")
     row = execute_returning_one(
         conn,
         """
@@ -93,21 +169,25 @@ def create_introduction(conn, ctx: WorkspaceContext, user: UserPrincipal, payloa
             user.user_id,
         ),
     )
+    introduction = get_introduction(conn, ctx, str(row["id"]))
+    log_audit(conn, ctx, user, "introduction.create", "introduction", introduction["id"], before=None, after=introduction)
     conn.commit()
-    return get_introduction(conn, ctx, str(row["id"]))
+    return introduction
 
 
 def get_introduction(conn, ctx: WorkspaceContext, introduction_id: str) -> Dict[str, Any]:
-    row = fetchone(conn, "SELECT * FROM introductions WHERE workspace_id = %s AND id = %s AND deleted_at IS NULL", (ctx.workspace_id, introduction_id))
-    if not row:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Introduction not found"})
-    if ctx.membership_role != "owner" and row.get("visibility") == "private":
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Private record"})
+    row = _get_intro_row(conn, ctx, introduction_id)
+    before = _row_to_intro(row)
     return _row_to_intro(row)
 
 
 def update_introduction(conn, ctx: WorkspaceContext, user: UserPrincipal, introduction_id: str, payload: IntroductionUpdate) -> Dict[str, Any]:
-    _ = get_introduction(conn, ctx, introduction_id)
+    row = _get_intro_row(conn, ctx, introduction_id)
+    current_status = INTRO_FROM_DB.get(row.get("status"), "requested")
+    next_status = payload.status.value if payload.status else current_status
+    consent_requester = payload.consent_requester if payload.consent_requester is not None else bool(row.get("consent_a"))
+    consent_target = payload.consent_target if payload.consent_target is not None else bool(row.get("consent_b"))
+    _validate_status_transition(current_status, next_status, consent_requester, consent_target)
 
     sets = []
     params: List[Any] = []
@@ -140,11 +220,14 @@ def update_introduction(conn, ctx: WorkspaceContext, user: UserPrincipal, introd
     sql = "UPDATE introductions SET " + ", ".join(sets) + " WHERE workspace_id = %s AND id = %s AND deleted_at IS NULL"
     params.extend([ctx.workspace_id, introduction_id])
     execute(conn, sql, tuple(params))
+    after = get_introduction(conn, ctx, introduction_id)
+    log_audit(conn, ctx, user, "introduction.update", "introduction", introduction_id, before=before, after=after)
     conn.commit()
-    return get_introduction(conn, ctx, introduction_id)
+    return after
 
 
 def delete_introduction(conn, ctx: WorkspaceContext, user: UserPrincipal, introduction_id: str) -> None:
-    _ = get_introduction(conn, ctx, introduction_id)
+    before = get_introduction(conn, ctx, introduction_id)
     execute(conn, "UPDATE introductions SET deleted_at = now(), updated_at = now(), updated_by = %s WHERE workspace_id = %s AND id = %s AND deleted_at IS NULL", (user.user_id, ctx.workspace_id, introduction_id))
+    log_audit(conn, ctx, user, "introduction.delete", "introduction", introduction_id, before=before, after={"deleted": True})
     conn.commit()

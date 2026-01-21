@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+      - name: Lint (typecheck)
+        working-directory: frontend
+        run: npm run lint
+
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend
+        run: docker compose build backend
+      - name: Start backend + postgres
+        run: docker compose up -d postgres backend
+      - name: Pytest
+        run: docker compose exec -T backend pytest -q
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build stack
+        run: docker compose build
+      - name: Start stack
+        run: docker compose up -d
+      - name: Wait for backend
+        run: |
+          for i in {1..30}; do
+            if curl -sSf http://localhost:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend не поднялся вовремя"
+          exit 1
+      - name: Wait for frontend
+        run: |
+          for i in {1..30}; do
+            if curl -sSf http://localhost:5173 >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Frontend не поднялся вовремя"
+          exit 1
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps
+      - name: Run e2e smoke
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:5173
+        run: npm run test:e2e
