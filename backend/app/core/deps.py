@@ -18,6 +18,13 @@ class WorkspaceContext:
     membership_role: str  # owner|assistant|collaborator
 
 
+@dataclass(frozen=True)
+class AccessContext:
+    user_id: str
+    workspace_id: str
+    role: str  # owner|assistant|collaborator
+
+
 @contextmanager
 def db_conn(request: Request) -> Generator:
     pool = request.app.state.pool
@@ -101,7 +108,12 @@ def _ensure_dev_identity(request: Request, role: str) -> tuple[UserPrincipal, st
 
 
 def _get_dev_role(request: Request) -> str:
-    role = request.headers.get("x-dev-role") or os.getenv("DEV_MEMBERSHIP_ROLE") or "owner"
+    role = (
+        request.headers.get("x-debug-role")
+        or request.headers.get("x-dev-role")
+        or os.getenv("DEV_MEMBERSHIP_ROLE")
+        or "owner"
+    )
     if role not in {"owner", "assistant"}:
         raise HTTPException(status_code=400, detail={"code": "VALIDATION_ERROR", "message": "Неверная роль доступа"})
     return role
@@ -191,6 +203,22 @@ async def get_workspace_context(
         raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Членство неактивно"})
 
     return WorkspaceContext(workspace_id=workspace_id_value, membership_role=str(role))
+
+
+async def get_access_context(
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    user: UserPrincipal = Depends(get_current_user),
+) -> AccessContext:
+    return AccessContext(user_id=user.user_id, workspace_id=ctx.workspace_id, role=ctx.membership_role)
+
+
+def require_role(role: str):
+    async def _checker(access: AccessContext = Depends(get_access_context)) -> AccessContext:
+        if access.role != role:
+            raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Недостаточно прав"})
+        return access
+
+    return _checker
 
 
 def require_permission(permission_key: str):

@@ -29,10 +29,20 @@ export type Contact = {
   display_name: string
   emails: string[]
   phones: string[]
+  messengers?: Record<string, string>
   tags: string[]
   tie_strength: 'close' | 'medium' | 'weak'
   created_at: string
   updated_at: string
+  company?: string | null
+  company_name?: string | null
+  organization?: { name: string } | null
+  job_title?: string | null
+  industries?: string[]
+  competencies?: string[]
+  met_context?: string | null
+  shared_notes?: string | null
+  private_notes?: string | null
 }
 
 export type Interaction = {
@@ -41,15 +51,48 @@ export type Interaction = {
   type: string
   occurred_at: string
   summary?: string | null
+  outcome?: string | null
   created_at: string
 }
 
 export type Reminder = {
   id: string
+  contact_id?: string | null
   type: string
   status: string
   title?: string | null
   due_at: string
+}
+
+export type Introduction = {
+  id: string
+  workspace_id: string
+  status: string
+  requester_contact_id: string
+  introducer_contact_id: string
+  target_contact_id: string
+  ask: string
+  benefit_for_requester?: string | null
+  benefit_for_target?: string | null
+  consent_requester: boolean
+  consent_target: boolean
+  sent_at?: string | null
+  met_at?: string | null
+  outcome?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type AuditEvent = {
+  id: string
+  workspace_id: string
+  actor_user_id?: string | null
+  action_key: string
+  entity_type: string
+  entity_id?: string | null
+  before?: Record<string, unknown> | null
+  after?: Record<string, unknown> | null
+  created_at: string
 }
 
 export type ApiRequestOptions = {

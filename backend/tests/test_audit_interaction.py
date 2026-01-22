@@ -27,7 +27,7 @@ def test_assistant_interaction_logged_in_audit(monkeypatch):
         interaction = client.post(
             f"/api/v1/contacts/{contact_id}/interactions",
             params={"workspace_id": workspace_id},
-            headers={"x-dev-role": "assistant"},
+            headers={"x-debug-role": "assistant"},
             json={"type": "call", "occurred_at": "2026-01-01T10:00:00+00:00"},
         )
         assert interaction.status_code == 201
@@ -38,11 +38,13 @@ def test_assistant_interaction_logged_in_audit(monkeypatch):
         audit = client.get(
             "/api/v1/audit",
             params={"workspace_id": workspace_id, "entity_type": "interaction"},
-            headers={"x-dev-role": "owner"},
+            headers={"x-debug-role": "owner"},
         )
         assert audit.status_code == 200
         data = audit.json().get("data", [])
         assert any(
-            item["entity_id"] == interaction_id and item["actor_user_id"] == assistant_id
+            item["entity_id"] == interaction_id
+            and item["actor_user_id"] == assistant_id
+            and item.get("after", {}).get("actor_role") == "assistant"
             for item in data
         )

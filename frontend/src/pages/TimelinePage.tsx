@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import type { Contact, Interaction } from '../types'
+import { t } from '../i18n/t'
 
 type TimelinePageProps = {
   selectedContact: Contact | null
@@ -31,38 +32,40 @@ export default function TimelinePage({
   }, [contactId, onSelectContact])
 
   if (!contactId) {
-    return <div>Сначала выберите контакт.</div>
+    return <div>{t('timelineSelectContact')}</div>
   }
 
   return (
     <section style={{ marginTop: 16 }}>
-      <h2>Таймлайн контакта</h2>
-      {loading && <div>Загрузка…</div>}
-      {!loading && !selectedContact && <div>Контакт не найден.</div>}
+      <h2>{t('timelineTitle')}</h2>
+      {loading && <div>{t('contactsLoading')}</div>}
+      {!loading && !selectedContact && <div>{t('timelineContactMissing')}</div>}
       {selectedContact && (
         <>
-          <div style={{ marginBottom: 12 }}>Контакт: {selectedContact.display_name}</div>
+          <div style={{ marginBottom: 12 }}>
+            {t('timelineContactLabel')}: {selectedContact.display_name}
+          </div>
           {timelineError && <div style={{ color: '#b00020' }}>{timelineError}</div>}
           <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
             <label>
-              Тип:
+              {t('timelineTypeLabel')}:
               <select
                 data-testid="interaction-type"
                 value={interactionForm.type}
                 onChange={(e) => onInteractionFormChange((prev) => ({ ...prev, type: e.target.value }))}
               >
-                <option value="meeting">Встреча</option>
-                <option value="call">Звонок</option>
-                <option value="message">Сообщение</option>
-                <option value="event">Событие</option>
-                <option value="intro">Интродукция</option>
-                <option value="help_given">Помощь оказана</option>
-                <option value="help_received">Помощь получена</option>
-                <option value="note">Заметка</option>
+                <option value="meeting">{t('timelineTypeMeeting')}</option>
+                <option value="call">{t('timelineTypeCall')}</option>
+                <option value="message">{t('timelineTypeMessage')}</option>
+                <option value="event">{t('timelineTypeEvent')}</option>
+                <option value="intro">{t('timelineTypeIntro')}</option>
+                <option value="help_given">{t('timelineTypeHelpGiven')}</option>
+                <option value="help_received">{t('timelineTypeHelpReceived')}</option>
+                <option value="note">{t('timelineTypeNote')}</option>
               </select>
             </label>
             <label>
-              Дата и время:
+              {t('timelineDateLabel')}:
               <input
                 data-testid="interaction-occurred-at"
                 value={interactionForm.occurredAt}
@@ -71,12 +74,12 @@ export default function TimelinePage({
             </label>
             <input
               data-testid="interaction-summary"
-              placeholder="Краткое описание"
+              placeholder={t('timelineSummaryPlaceholder')}
               value={interactionForm.summary}
               onChange={(e) => onInteractionFormChange((prev) => ({ ...prev, summary: e.target.value }))}
             />
             <button data-testid="interaction-create" onClick={() => onCreateInteraction(selectedContact.id)}>
-              Добавить взаимодействие
+              {t('timelineAddButton')}
             </button>
           </div>
           <ul data-testid="timeline-list">

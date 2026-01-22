@@ -13,8 +13,25 @@ from app.services.mapping import REMINDER_STATUS_FROM_DB, REMINDER_STATUS_TO_DB,
 from app.utils.pagination import decode_cursor, encode_cursor
 
 
-def _row_to_reminder(row: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+LIMITED_FIELDS = {"body"}
+REDACTION_DEFAULTS = {"body": None}
+
+
+def _redact_fields(data: Dict[str, Any], fields: set[str]) -> Dict[str, Any]:
+    for field in fields:
+        data[field] = REDACTION_DEFAULTS.get(field)
+    return data
+
+
+def _redact_reminder_dict(data: Dict[str, Any], ctx: WorkspaceContext, contact_visibility: Optional[str]) -> Dict[str, Any]:
+    if ctx.membership_role != "owner" and contact_visibility == "limited":
+        _redact_fields(data, LIMITED_FIELDS)
+    return data
+
+
+def _row_to_reminder(row: Dict[str, Any], ctx: WorkspaceContext) -> Dict[str, Any]:
+    contact_visibility = row.get("contact_visibility")
+    data = {
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
         "contact_id": str(row.get("contact_id")) if row.get("contact_id") else None,
@@ -29,6 +46,7 @@ def _row_to_reminder(row: Dict[str, Any]) -> Dict[str, Any]:
         "created_at": row.get("created_at").isoformat(),
         "updated_at": row.get("updated_at").isoformat(),
     }
+    return _redact_reminder_dict(data, ctx, contact_visibility)
 
 
 def list_reminders(
@@ -41,7 +59,7 @@ def list_reminders(
     due_after: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     params: List[Any] = [ctx.workspace_id]
-    where = ["workspace_id = %s", "deleted_at IS NULL"]
+    where = ["r.workspace_id = %s", "r.deleted_at IS NULL"]
 
     if status:
         where.append("status = %s")
@@ -59,11 +77,19 @@ def list_reminders(
         where.append("(due_at, id) > (%s, %s)")
         params.extend([c["due_at"], c["id"]])
 
-    sql = "SELECT * FROM reminders WHERE " + " AND ".join(where) + " ORDER BY due_at ASC, id ASC LIMIT %s"
+    if ctx.membership_role != "owner":
+        where.append("(r.contact_id IS NULL OR c.visibility IS NULL OR c.visibility <> 'private')")
+
+    sql = """
+        SELECT r.*, c.visibility AS contact_visibility
+        FROM reminders r
+        LEFT JOIN contacts c ON c.id = r.contact_id AND c.deleted_at IS NULL
+        WHERE
+    """ + " AND ".join(where) + " ORDER BY r.due_at ASC, r.id ASC LIMIT %s"
     params.append(limit)
 
     rows = fetchall(conn, sql, tuple(params))
-    data = [_row_to_reminder(r) for r in rows]
+    data = [_row_to_reminder(r, ctx) for r in rows]
 
     next_cur = None
     if len(rows) == limit:
@@ -105,10 +131,21 @@ def create_reminder(conn, ctx: WorkspaceContext, user: UserPrincipal, payload: R
 
 
 def get_reminder(conn, ctx: WorkspaceContext, reminder_id: str) -> Dict[str, Any]:
-    row = fetchone(conn, "SELECT * FROM reminders WHERE workspace_id = %s AND id = %s AND deleted_at IS NULL", (ctx.workspace_id, reminder_id))
+    row = fetchone(
+        conn,
+        """
+        SELECT r.*, c.visibility AS contact_visibility
+        FROM reminders r
+        LEFT JOIN contacts c ON c.id = r.contact_id AND c.deleted_at IS NULL
+        WHERE r.workspace_id = %s AND r.id = %s AND r.deleted_at IS NULL
+        """,
+        (ctx.workspace_id, reminder_id),
+    )
     if not row:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Напоминание не найдено"})
-    return _row_to_reminder(row)
+    if ctx.membership_role != "owner" and row.get("contact_visibility") == "private":
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Напоминание не найдено"})
+    return _row_to_reminder(row, ctx)
 
 
 def update_reminder(conn, ctx: WorkspaceContext, user: UserPrincipal, reminder_id: str, payload: ReminderUpdate) -> Dict[str, Any]:

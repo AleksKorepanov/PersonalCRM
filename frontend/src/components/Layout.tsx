@@ -1,5 +1,9 @@
 import React from 'react'
 import { NavLink } from 'react-router-dom'
+import { t } from '../i18n/t'
+import Button from './ui/Button'
+import Select from './ui/Select'
+import TextField from './ui/TextField'
 
 type LayoutProps = {
   children: React.ReactNode
@@ -7,6 +11,9 @@ type LayoutProps = {
   onSearchChange: (value: string) => void
   userEmail?: string | null
   roleLabel?: string
+  isDevMode?: boolean
+  devRole?: 'owner' | 'assistant'
+  onDevRoleChange?: (value: 'owner' | 'assistant') => void
   onCreate?: () => void
 }
 
@@ -15,9 +22,13 @@ export default function Layout({
   searchQuery,
   onSearchChange,
   userEmail,
-  roleLabel = 'Владелец',
+  roleLabel,
+  isDevMode = false,
+  devRole = 'owner',
+  onDevRoleChange,
   onCreate,
 }: LayoutProps) {
+  const resolvedRoleLabel = roleLabel ?? t('roleOwner')
   const navLinkStyle = ({ isActive }: { isActive: boolean }) => ({
     display: 'block',
     padding: '10px 12px',
@@ -38,25 +49,31 @@ export default function Layout({
             background: '#fafafa',
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: 16 }}>PersonalCRM</div>
+          <div style={{ fontWeight: 700, marginBottom: 16 }}>{t('appName')}</div>
           <nav style={{ display: 'grid', gap: 4 }}>
             <NavLink data-testid="tab-contacts" to="/contacts" style={navLinkStyle}>
-              Контакты
+              {t('menuContacts')}
             </NavLink>
             <NavLink data-testid="tab-reminders" to="/reminders" style={navLinkStyle}>
-              Напоминания
+              {t('menuReminders')}
             </NavLink>
             <NavLink to="/introductions" style={navLinkStyle}>
-              Интродукции
+              {t('menuIntroductions')}
             </NavLink>
             <NavLink to="/projects" style={navLinkStyle}>
-              Проекты
+              {t('menuProjects')}
             </NavLink>
             <NavLink to="/strategy" style={navLinkStyle}>
-              Стратегия
+              {t('menuStrategy')}
+            </NavLink>
+            <NavLink to="/week" style={navLinkStyle}>
+              {t('menuWeekPanel')}
+            </NavLink>
+            <NavLink to="/stale" style={navLinkStyle}>
+              {t('menuStaleContacts')}
             </NavLink>
             <NavLink to="/audit" style={navLinkStyle}>
-              Аудит
+              {t('menuAudit')}
             </NavLink>
           </nav>
         </aside>
@@ -72,15 +89,34 @@ export default function Layout({
               background: '#fff',
             }}
           >
-            <input
-              placeholder="Поиск"
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1px solid #ddd' }}
-            />
-            <div style={{ fontSize: 14, color: '#444' }}>Роль: {roleLabel}</div>
-            <div style={{ fontSize: 14, color: '#666' }}>Пользователь: {userEmail ?? '—'}</div>
-            <button onClick={onCreate ?? (() => alert('Создание скоро появится'))}>Создать</button>
+            <div style={{ flex: 1 }}>
+              <TextField
+                label={t('searchPlaceholder')}
+                placeholder={t('searchPlaceholder')}
+                value={searchQuery}
+                onChange={onSearchChange}
+              />
+            </div>
+            {isDevMode && onDevRoleChange ? (
+              <div style={{ width: 180 }}>
+                <Select
+                  label={t('roleDevSwitchLabel')}
+                  value={devRole}
+                  onChange={(value) => onDevRoleChange(value as 'owner' | 'assistant')}
+                  options={[
+                    { value: 'owner', label: t('roleOwner') },
+                    { value: 'assistant', label: t('roleAssistant') },
+                  ]}
+                />
+              </div>
+            ) : null}
+            <div style={{ fontSize: 14, color: '#444' }}>
+              {t('roleLabel')}: {resolvedRoleLabel}
+            </div>
+            <div style={{ fontSize: 14, color: '#666' }}>
+              {t('userLabel')}: {userEmail ?? t('emptyValue')}
+            </div>
+            <Button onClick={onCreate ?? (() => alert(t('createSoonAlert')))}>{t('createButton')}</Button>
           </header>
 
           <main style={{ padding: 20, flex: 1 }}>{children}</main>

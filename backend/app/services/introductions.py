@@ -13,8 +13,33 @@ from app.services.mapping import INTRO_FROM_DB, INTRO_TO_DB
 from app.utils.pagination import decode_cursor, encode_cursor
 
 
-def _row_to_intro(row: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+LIMITED_FIELDS = {"benefit_for_requester", "benefit_for_target", "outcome"}
+REDACTION_DEFAULTS = {
+    "benefit_for_requester": None,
+    "benefit_for_target": None,
+    "outcome": None,
+}
+
+
+def _redact_fields(data: Dict[str, Any], fields: set[str]) -> Dict[str, Any]:
+    for field in fields:
+        data[field] = REDACTION_DEFAULTS.get(field)
+    return data
+
+
+def _redact_intro_dict(data: Dict[str, Any], ctx: WorkspaceContext, visibilities: List[Optional[str]]) -> Dict[str, Any]:
+    if ctx.membership_role != "owner" and "limited" in (v for v in visibilities if v):
+        _redact_fields(data, LIMITED_FIELDS)
+    return data
+
+
+def _row_to_intro(row: Dict[str, Any], ctx: WorkspaceContext) -> Dict[str, Any]:
+    visibilities = [
+        row.get("requester_visibility"),
+        row.get("introducer_visibility"),
+        row.get("target_visibility"),
+    ]
+    data = {
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
         "status": INTRO_FROM_DB.get(row.get("status"), "requested"),
@@ -33,6 +58,7 @@ def _row_to_intro(row: Dict[str, Any]) -> Dict[str, Any]:
         "created_at": row.get("created_at").isoformat(),
         "updated_at": row.get("updated_at").isoformat(),
     }
+    return _redact_intro_dict(data, ctx, visibilities)
 
 
 def list_introductions(
@@ -44,31 +70,51 @@ def list_introductions(
     contact_id: Optional[str] = None,
 ):
     params: List[Any] = [ctx.workspace_id]
-    where = ["workspace_id = %s", "deleted_at IS NULL"]
+    where = ["i.workspace_id = %s", "i.deleted_at IS NULL"]
 
     if ctx.membership_role != "owner":
-        where.append("visibility <> 'private'")
+        where.append("i.visibility <> 'private'")
+        where.append(
+            "("
+            "c_req.visibility IS NULL OR c_req.visibility <> 'private'"
+            ") AND ("
+            "c_intro.visibility IS NULL OR c_intro.visibility <> 'private'"
+            ") AND ("
+            "c_tgt.visibility IS NULL OR c_tgt.visibility <> 'private'"
+            ")"
+        )
 
     if status:
-        where.append("status = %s")
+        where.append("i.status = %s")
         params.append(INTRO_TO_DB.get(status, status))
 
     if contact_id:
         where.append(
-            "(requester_contact_id = %s OR introducer_contact_id = %s OR target_contact_id = %s)"
+            "(i.requester_contact_id = %s OR i.introducer_contact_id = %s OR i.target_contact_id = %s)"
         )
         params.extend([contact_id, contact_id, contact_id])
 
     if cursor:
         c = decode_cursor(cursor)
-        where.append("(created_at, id) < (%s, %s)")
+        where.append("(i.created_at, i.id) < (%s, %s)")
         params.extend([c["created_at"], c["id"]])
 
-    sql = "SELECT * FROM introductions WHERE " + " AND ".join(where) + " ORDER BY created_at DESC, id DESC LIMIT %s"
+    sql = """
+        SELECT
+          i.*,
+          c_req.visibility AS requester_visibility,
+          c_intro.visibility AS introducer_visibility,
+          c_tgt.visibility AS target_visibility
+        FROM introductions i
+        LEFT JOIN contacts c_req ON c_req.id = i.requester_contact_id AND c_req.deleted_at IS NULL
+        LEFT JOIN contacts c_intro ON c_intro.id = i.introducer_contact_id AND c_intro.deleted_at IS NULL
+        LEFT JOIN contacts c_tgt ON c_tgt.id = i.target_contact_id AND c_tgt.deleted_at IS NULL
+        WHERE
+    """ + " AND ".join(where) + " ORDER BY i.created_at DESC, i.id DESC LIMIT %s"
     params.append(limit)
 
     rows = fetchall(conn, sql, tuple(params))
-    data = [_row_to_intro(r) for r in rows]
+    data = [_row_to_intro(r, ctx) for r in rows]
 
     next_cur = None
     if len(rows) == limit:
@@ -81,13 +127,28 @@ def list_introductions(
 def _get_intro_row(conn, ctx: WorkspaceContext, introduction_id: str) -> Dict[str, Any]:
     row = fetchone(
         conn,
-        "SELECT * FROM introductions WHERE workspace_id = %s AND id = %s AND deleted_at IS NULL",
+        """
+        SELECT
+          i.*,
+          c_req.visibility AS requester_visibility,
+          c_intro.visibility AS introducer_visibility,
+          c_tgt.visibility AS target_visibility
+        FROM introductions i
+        LEFT JOIN contacts c_req ON c_req.id = i.requester_contact_id AND c_req.deleted_at IS NULL
+        LEFT JOIN contacts c_intro ON c_intro.id = i.introducer_contact_id AND c_intro.deleted_at IS NULL
+        LEFT JOIN contacts c_tgt ON c_tgt.id = i.target_contact_id AND c_tgt.deleted_at IS NULL
+        WHERE i.workspace_id = %s AND i.id = %s AND i.deleted_at IS NULL
+        """,
         (ctx.workspace_id, introduction_id),
     )
     if not row:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Интродукция не найдена"})
-    if ctx.membership_role != "owner" and row.get("visibility") == "private":
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Запись приватная"})
+    if ctx.membership_role != "owner":
+        if row.get("visibility") == "private":
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Интродукция не найдена"})
+        for key in ("requester_visibility", "introducer_visibility", "target_visibility"):
+            if row.get(key) == "private":
+                raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Интродукция не найдена"})
     return row
 
 
@@ -177,12 +238,13 @@ def create_introduction(conn, ctx: WorkspaceContext, user: UserPrincipal, payloa
 
 def get_introduction(conn, ctx: WorkspaceContext, introduction_id: str) -> Dict[str, Any]:
     row = _get_intro_row(conn, ctx, introduction_id)
-    before = _row_to_intro(row)
-    return _row_to_intro(row)
+    before = _row_to_intro(row, ctx)
+    return _row_to_intro(row, ctx)
 
 
 def update_introduction(conn, ctx: WorkspaceContext, user: UserPrincipal, introduction_id: str, payload: IntroductionUpdate) -> Dict[str, Any]:
     row = _get_intro_row(conn, ctx, introduction_id)
+    before = _row_to_intro(row, ctx)
     current_status = INTRO_FROM_DB.get(row.get("status"), "requested")
     next_status = payload.status.value if payload.status else current_status
     consent_requester = payload.consent_requester if payload.consent_requester is not None else bool(row.get("consent_a"))

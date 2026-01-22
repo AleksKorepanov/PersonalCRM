@@ -13,8 +13,24 @@ from app.services.db import execute, execute_returning_one, fetchall, fetchone
 from app.utils.pagination import decode_cursor, encode_cursor
 
 
-def _row_to_project(row: Dict[str, Any], participant_ids: List[str]) -> Dict[str, Any]:
-    return {
+LIMITED_FIELDS = {"description"}
+REDACTION_DEFAULTS = {"description": None}
+
+
+def _redact_fields(data: Dict[str, Any], fields: set[str]) -> Dict[str, Any]:
+    for field in fields:
+        data[field] = REDACTION_DEFAULTS.get(field)
+    return data
+
+
+def _redact_project_dict(data: Dict[str, Any], ctx: WorkspaceContext, has_limited: bool) -> Dict[str, Any]:
+    if ctx.membership_role != "owner" and has_limited:
+        _redact_fields(data, LIMITED_FIELDS)
+    return data
+
+
+def _row_to_project(row: Dict[str, Any], participant_ids: List[str], ctx: WorkspaceContext, has_limited: bool) -> Dict[str, Any]:
+    data = {
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
         "visibility": row.get("visibility") or "shared",
@@ -27,6 +43,7 @@ def _row_to_project(row: Dict[str, Any], participant_ids: List[str]) -> Dict[str
         "created_at": row.get("created_at").isoformat(),
         "updated_at": row.get("updated_at").isoformat(),
     }
+    return _redact_project_dict(data, ctx, has_limited)
 
 
 def _fetch_participant_ids(conn, project_id: str) -> List[str]:
@@ -36,6 +53,17 @@ def _fetch_participant_ids(conn, project_id: str) -> List[str]:
         (project_id,),
     )
     return [str(r["contact_id"]) for r in rows]
+
+
+def _fetch_participant_visibilities(conn, contact_ids: List[str]) -> List[str]:
+    if not contact_ids:
+        return []
+    rows = fetchall(
+        conn,
+        "SELECT visibility FROM contacts WHERE id = ANY(%s) AND deleted_at IS NULL",
+        (contact_ids,),
+    )
+    return [r["visibility"] for r in rows]
 
 
 def list_projects(conn, ctx: WorkspaceContext, q: Optional[str] = None, status: Optional[str] = None, limit: int = 50, cursor: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
@@ -63,7 +91,14 @@ def list_projects(conn, ctx: WorkspaceContext, q: Optional[str] = None, status: 
     params.append(limit)
 
     rows = fetchall(conn, sql, tuple(params))
-    items = [_row_to_project(r, _fetch_participant_ids(conn, str(r["id"]))) for r in rows]
+    items = []
+    for r in rows:
+        participant_ids = _fetch_participant_ids(conn, str(r["id"]))
+        visibilities = _fetch_participant_visibilities(conn, participant_ids)
+        if ctx.membership_role != "owner" and "private" in visibilities:
+            continue
+        has_limited = "limited" in visibilities
+        items.append(_row_to_project(r, participant_ids, ctx, has_limited))
 
     next_cursor = None
     if len(rows) == limit:
@@ -105,10 +140,13 @@ def get_project(conn, ctx: WorkspaceContext, project_id: str) -> Dict[str, Any]:
     row = fetchone(conn, "SELECT * FROM projects WHERE workspace_id=%s AND id=%s AND deleted_at IS NULL", (ctx.workspace_id, project_id))
     if not row:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Проект не найден"})
-    if ctx.membership_role != "owner" and row.get("visibility") == "private":
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Запись приватная"})
     participant_ids = _fetch_participant_ids(conn, project_id)
-    return _row_to_project(row, participant_ids)
+    visibilities = _fetch_participant_visibilities(conn, participant_ids)
+    if ctx.membership_role != "owner":
+        if row.get("visibility") == "private" or "private" in visibilities:
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Проект не найден"})
+    has_limited = "limited" in visibilities
+    return _row_to_project(row, participant_ids, ctx, has_limited)
 
 
 def _set_participants(conn, project_id: str, contact_ids: List[str]) -> None:

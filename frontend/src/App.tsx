@@ -1,19 +1,33 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
+import { t } from './i18n/t'
+import ContactCardPage from './pages/ContactCardPage'
 import ContactsPage from './pages/ContactsPage'
+import AuditPage from './pages/AuditPage'
 import PlaceholderPage from './pages/PlaceholderPage'
 import RemindersPage from './pages/RemindersPage'
+import IntroductionsPage from './pages/IntroductionsPage'
+import StaleContactsPage from './pages/StaleContactsPage'
+import WeekPanelPage from './pages/WeekPanelPage'
+import StrategyPage from './pages/StrategyPage'
 import TimelinePage from './pages/TimelinePage'
 import type { ApiRequestOptions, Contact, ImportContact, Interaction, MeResponse, Reminder } from './types'
 
 export default function App() {
   const apiBase = useMemo(() => import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000', [])
+  const isDevMode = import.meta.env.DEV
+  const [debugRole, setDebugRole] = useState<'owner' | 'assistant'>(() => {
+    if (!isDevMode) return 'owner'
+    const stored = window.localStorage.getItem('debugRole')
+    return stored === 'assistant' ? 'assistant' : 'owner'
+  })
   const [me, setMe] = useState<MeResponse | null>(null)
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [backendStatus, setBackendStatus] = useState<'checking' | 'ok' | 'down'>('checking')
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
 
   const [contacts, setContacts] = useState<Contact[]>([])
   const [contactsLoading, setContactsLoading] = useState(false)
@@ -23,9 +37,14 @@ export default function App() {
     tieStrength: 'medium',
     visibility: 'shared',
     email: '',
+    phone: '',
   })
   const [contactError, setContactError] = useState<string | null>(null)
   const [importStatus, setImportStatus] = useState<string | null>(null)
+  const [contactFormErrors, setContactFormErrors] = useState<{ displayName?: string; email?: string; phone?: string }>({})
+  const [contactSubmitError, setContactSubmitError] = useState<string | null>(null)
+  const [contactSubmitting, setContactSubmitting] = useState(false)
+  const [contactModalOpen, setContactModalOpen] = useState(false)
 
   const [interactions, setInteractions] = useState<Interaction[]>([])
   const [interactionForm, setInteractionForm] = useState({
@@ -62,6 +81,7 @@ export default function App() {
         method,
         headers: {
           'Content-Type': 'application/json',
+          ...(isDevMode ? { 'X-Debug-Role': debugRole } : {}),
         },
         body: body ? JSON.stringify(body) : undefined,
       })
@@ -74,16 +94,20 @@ export default function App() {
       }
       if (!response.ok) {
         const message =
-          typeof payload === 'object' && payload && 'error' in payload
-            ? (payload as { error?: { message?: string } }).error?.message
+          typeof payload === 'object' && payload
+            ? 'error' in payload
+              ? (payload as { error?: { message?: string } }).error?.message
+              : 'message' in payload
+                ? (payload as { message?: string }).message
+                : undefined
             : typeof payload === 'string'
               ? payload
-              : `Ошибка API: ${response.status}`
-        throw new Error(message || `Ошибка API: ${response.status}`)
+              : undefined
+        throw new Error(message || `${t('apiErrorPrefix')}: ${response.status}`)
       }
       return payload as T
     },
-    [apiBase, workspaceId],
+    [apiBase, workspaceId, debugRole, isDevMode],
   )
 
   useEffect(() => {
@@ -98,7 +122,9 @@ export default function App() {
         if (isMounted) setBackendStatus('down')
       })
 
-    fetch(`${apiBase}/api/v1/me`)
+    fetch(`${apiBase}/api/v1/me`, {
+      headers: isDevMode ? { 'X-Debug-Role': debugRole } : undefined,
+    })
       .then(async (r) => {
         if (!r.ok) throw new Error(await r.text())
         return r.json()
@@ -112,7 +138,17 @@ export default function App() {
     return () => {
       isMounted = false
     }
-  }, [apiBase])
+  }, [apiBase, debugRole, isDevMode])
+
+  useEffect(() => {
+    if (!isDevMode) return
+    window.localStorage.setItem('debugRole', debugRole)
+  }, [debugRole, isDevMode])
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedSearch(searchQuery), 300)
+    return () => window.clearTimeout(timeout)
+  }, [searchQuery])
 
   const loadContacts = useCallback(async () => {
     if (!workspaceId) return
@@ -128,6 +164,17 @@ export default function App() {
     }
   }, [apiRequest, workspaceId])
 
+  const searchContacts = useCallback(
+    async (query: string) => {
+      if (!workspaceId) return []
+      const res = await apiRequest<{ data: Contact[] }>('/api/v1/contacts')
+      const q = query.trim().toLowerCase()
+      if (!q) return res.data || []
+      return (res.data || []).filter((item) => item.display_name.toLowerCase().includes(q))
+    },
+    [apiRequest, workspaceId],
+  )
+
   const loadReminders = useCallback(async () => {
     if (!workspaceId) return
     setRemindersLoading(true)
@@ -142,6 +189,15 @@ export default function App() {
     }
   }, [apiRequest, workspaceId])
 
+  const loadRemindersForContact = useCallback(
+    async (contactId: string) => {
+      if (!workspaceId) return []
+      const res = await apiRequest<{ data: Reminder[] }>('/api/v1/reminders')
+      return (res.data || []).filter((item) => item.contact_id === contactId)
+    },
+    [apiRequest, workspaceId],
+  )
+
   const loadTimeline = useCallback(
     async (contactId: string) => {
       if (!workspaceId) return
@@ -152,6 +208,71 @@ export default function App() {
       } catch (e) {
         setTimelineError((e as Error).message)
       }
+    },
+    [apiRequest, workspaceId],
+  )
+
+  const loadContactInteractions = useCallback(
+    async (contactId: string) => {
+      if (!workspaceId) return []
+      const res = await apiRequest<{ data: Interaction[] }>(`/api/v1/contacts/${contactId}/interactions`)
+      return res.data || []
+    },
+    [apiRequest, workspaceId],
+  )
+
+  const createInteraction = useCallback(
+    async (
+      contactId: string,
+      payload: {
+        type: string
+        occurred_at: string
+        summary?: string
+        next_action?: string
+      },
+    ) => {
+      if (!workspaceId) return
+      await apiRequest(`/api/v1/contacts/${contactId}/interactions`, { method: 'POST', body: payload })
+    },
+    [apiRequest, workspaceId],
+  )
+
+  const createReminder = useCallback(
+    async (
+      contactId: string,
+      payload: {
+        title?: string
+        body?: string
+        due_at: string
+      },
+    ) => {
+      if (!workspaceId) return
+      await apiRequest('/api/v1/reminders', {
+        method: 'POST',
+        body: {
+          contact_id: contactId,
+          type: 'follow_up',
+          title: payload.title,
+          body: payload.body,
+          due_at: payload.due_at,
+        },
+      })
+    },
+    [apiRequest, workspaceId],
+  )
+
+  const createIntroduction = useCallback(
+    async (payload: {
+      requester_contact_id: string
+      introducer_contact_id: string
+      target_contact_id: string
+      ask: string
+      benefit_for_requester?: string
+      benefit_for_target?: string
+      status?: string
+    }) => {
+      if (!workspaceId) return
+      await apiRequest('/api/v1/introductions', { method: 'POST', body: payload })
     },
     [apiRequest, workspaceId],
   )
@@ -169,6 +290,20 @@ export default function App() {
       return contact
     },
     [apiRequest, contacts, workspaceId],
+  )
+
+  const updateContact = useCallback(
+    async (contactId: string, payload: Record<string, unknown>) => {
+      if (!workspaceId) return null
+      const updated = await apiRequest<Contact>(`/api/v1/contacts/${contactId}`, {
+        method: 'PATCH',
+        body: payload,
+      })
+      setContacts((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      setSelectedContact(updated)
+      return updated
+    },
+    [apiRequest, workspaceId],
   )
 
   const selectContact = useCallback(
@@ -189,21 +324,52 @@ export default function App() {
     }
   }, [loadContacts, loadReminders, workspaceId])
 
+  const validateContactForm = () => {
+    const errors: { displayName?: string; email?: string; phone?: string } = {}
+    const name = contactForm.displayName.trim()
+    const email = contactForm.email.trim()
+    const phone = contactForm.phone.trim()
+
+    if (!name) {
+      errors.displayName = t('contactValidationName')
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.email = t('contactValidationEmail')
+    }
+    if (phone && !/^\+?\d+$/.test(phone)) {
+      errors.phone = t('contactValidationPhone')
+    }
+
+    setContactFormErrors(errors)
+    return Object.keys(errors).length === 0
+  }
+
   const handleCreateContact = async () => {
     if (!workspaceId) return
-    setContactError(null)
+    setContactSubmitError(null)
+    if (!validateContactForm()) return
+    setContactSubmitting(true)
     try {
       const payload = {
         display_name: contactForm.displayName.trim(),
         tie_strength: contactForm.tieStrength,
         visibility: contactForm.visibility,
-        emails: contactForm.email ? [contactForm.email.trim()] : [],
+        emails: contactForm.email.trim() ? [contactForm.email.trim()] : [],
+        phones: contactForm.phone.trim() ? [contactForm.phone.trim()] : [],
       }
       const created = await apiRequest<Contact>('/api/v1/contacts', { method: 'POST', body: payload })
       setContacts((prev) => [created, ...prev])
-      setContactForm({ displayName: '', tieStrength: 'medium', visibility: 'shared', email: '' })
+      setContactForm({ displayName: '', tieStrength: 'medium', visibility: 'shared', email: '', phone: '' })
+      setContactFormErrors({})
+      setContactModalOpen(false)
     } catch (e) {
-      setContactError((e as Error).message)
+      const baseMessage = t('contactCreateErrorBase')
+      const detail = (e as Error).message
+      setContactSubmitError(
+        import.meta.env.DEV ? `${baseMessage} ${t('contactCreateErrorDetails')} ${detail}` : baseMessage,
+      )
+    } finally {
+      setContactSubmitting(false)
     }
   }
 
@@ -246,14 +412,14 @@ export default function App() {
     const headers = lines[0].split(',').map((h) => h.trim().toLowerCase())
     const nameIdx = headers.findIndex((h) => ['display_name', 'name', 'full_name'].includes(h))
     const emailIdx = headers.findIndex((h) => ['email', 'emails'].includes(h))
-    const phoneIdx = headers.findIndex((h) => ['phone', 'phones', 'телефон', 'phone_number'].includes(h))
+    const phoneIdx = headers.findIndex((h) => ['phone', 'phones', t('csvHeaderPhoneRu'), 'phone_number'].includes(h))
     return lines.slice(1).map((line) => {
       const cells = line.split(',').map((c) => c.trim())
       const name = nameIdx >= 0 ? cells[nameIdx] : cells[0]
       const email = emailIdx >= 0 ? cells[emailIdx] : ''
       const phone = phoneIdx >= 0 ? cells[phoneIdx] : ''
       return {
-        display_name: name || 'Без имени',
+        display_name: name || t('contactsNoName'),
         emails: email ? [email] : [],
         phones: phone ? [phone] : [],
       }
@@ -273,11 +439,11 @@ export default function App() {
         const nameLine = lines.find((l) => l.toUpperCase().startsWith('FN:'))
         const emailLine = lines.find((l) => l.toUpperCase().startsWith('EMAIL'))
         const phoneLine = lines.find((l) => l.toUpperCase().startsWith('TEL'))
-        const name = nameLine ? nameLine.split(':').slice(1).join(':').trim() : 'Без имени'
+        const name = nameLine ? nameLine.split(':').slice(1).join(':').trim() : t('contactsNoName')
         const email = emailLine ? emailLine.split(':').slice(1).join(':').trim() : ''
         const phone = phoneLine ? phoneLine.split(':').slice(1).join(':').trim() : ''
         return {
-          display_name: name || 'Без имени',
+          display_name: name || t('contactsNoName'),
           emails: email ? [email] : [],
           phones: phone ? [phone] : [],
         }
@@ -288,7 +454,7 @@ export default function App() {
     const data = JSON.parse(text)
     if (!Array.isArray(data)) return []
     return data.map((item) => {
-      const name = item.display_name || item.name || item.full_name || 'Без имени'
+      const name = item.display_name || item.name || item.full_name || t('contactsNoName')
       const email = item.email || item.emails?.[0] || ''
       const phone = item.phone || item.phones?.[0] || ''
       return {
@@ -301,7 +467,7 @@ export default function App() {
 
   const handleImportContacts = async (file: File) => {
     if (!workspaceId) return
-    setImportStatus('Импорт выполняется…')
+    setImportStatus(t('importInProgress'))
     setContactError(null)
     try {
       const text = await file.text()
@@ -329,23 +495,31 @@ export default function App() {
         })
         successCount += 1
       }
-      setImportStatus(`Импорт завершён: ${successCount} контактов`)
+      setImportStatus(`${t('importDonePrefix')} ${successCount} ${t('importDoneSuffix')}`)
       await loadContacts()
     } catch (e) {
       setImportStatus(null)
-      setContactError(`Ошибка импорта: ${(e as Error).message}`)
+      setContactError(`${t('importErrorPrefix')} ${(e as Error).message}`)
     }
   }
 
   const workspaceHint = workspaceId ? null : (
     <div style={{ marginTop: 12, padding: 12, background: '#fff7e6', borderRadius: 8 }}>
-      Не найден workspace. Проверьте dev seed и доступ к /api/v1/me.
+      {t('workspaceMissing')}
     </div>
   )
 
   return (
-    <Layout searchQuery={searchQuery} onSearchChange={setSearchQuery} userEmail={me?.user.email}>
-      <p style={{ color: '#666', marginTop: 0 }}>Минимальный интерфейс для работы с базовыми сущностями.</p>
+    <Layout
+      searchQuery={searchQuery}
+      onSearchChange={setSearchQuery}
+      userEmail={me?.user.email}
+      roleLabel={debugRole === 'assistant' ? t('roleAssistant') : t('roleOwner')}
+      isDevMode={isDevMode}
+      devRole={debugRole}
+      onDevRoleChange={setDebugRole}
+    >
+      <p style={{ color: '#666', marginTop: 0 }}>{t('appTagline')}</p>
       {workspaceHint}
 
       <Routes>
@@ -355,16 +529,49 @@ export default function App() {
           element={
             <ContactsPage
               contacts={contacts}
+              role={debugRole}
               contactsLoading={contactsLoading}
               contactError={contactError}
               importStatus={importStatus}
               contactForm={contactForm}
+              contactFormErrors={contactFormErrors}
+              searchQuery={debouncedSearch}
               onContactFormChange={setContactForm}
               onRefreshContacts={loadContacts}
               onCreateContact={handleCreateContact}
               onOpenContact={(contact) => setSelectedContact(contact)}
               onImportContacts={handleImportContacts}
               selectedContact={selectedContact}
+              submitError={contactSubmitError}
+              submitting={contactSubmitting}
+              isModalOpen={contactModalOpen}
+              onOpenModal={() => {
+                setContactModalOpen(true)
+                setContactFormErrors({})
+                setContactSubmitError(null)
+              }}
+              onCloseModal={() => {
+                setContactModalOpen(false)
+                setContactFormErrors({})
+                setContactSubmitError(null)
+              }}
+            />
+          }
+        />
+        <Route
+          path="/contacts/:contactId"
+          element={
+            <ContactCardPage
+              role={debugRole}
+              loadContact={loadContactById}
+              updateContact={updateContact}
+              loadInteractions={loadContactInteractions}
+              createInteraction={createInteraction}
+              createReminder={createReminder}
+              onReminderCreated={loadReminders}
+              createIntroduction={createIntroduction}
+              searchContacts={searchContacts}
+              loadRemindersForContact={loadRemindersForContact}
             />
           }
         />
@@ -396,18 +603,58 @@ export default function App() {
             />
           }
         />
-        <Route path="/introductions" element={<PlaceholderPage title="Интродукции" description="Раздел в разработке." />} />
-        <Route path="/projects" element={<PlaceholderPage title="Проекты" description="Раздел в разработке." />} />
-        <Route path="/strategy" element={<PlaceholderPage title="Стратегия" description="Раздел в разработке." />} />
-        <Route path="/audit" element={<PlaceholderPage title="Аудит" description="Раздел в разработке." />} />
+        <Route
+          path="/week"
+          element={
+            <WeekPanelPage
+              contacts={contacts}
+              contactsLoading={contactsLoading}
+              contactError={contactError}
+              role={debugRole}
+              reminders={reminders}
+              remindersLoading={remindersLoading}
+              reminderError={reminderError}
+              loadInteractions={loadContactInteractions}
+              onRefreshContacts={loadContacts}
+              onRefreshReminders={loadReminders}
+              apiRequest={apiRequest}
+            />
+          }
+        />
+        <Route
+          path="/stale"
+          element={
+            <StaleContactsPage
+              contacts={contacts}
+              contactsLoading={contactsLoading}
+              contactError={contactError}
+              role={debugRole}
+              loadInteractions={loadContactInteractions}
+              onRefreshContacts={loadContacts}
+            />
+          }
+        />
+        <Route
+          path="/introductions"
+          element={<IntroductionsPage contacts={contacts} apiRequest={apiRequest} />}
+        />
+        <Route path="/projects" element={<PlaceholderPage title={t('menuProjects')} description={t('placeholderDescription')} />} />
+        <Route path="/strategy" element={<StrategyPage />} />
+        <Route path="/audit" element={<AuditPage role={debugRole} apiRequest={apiRequest} />} />
       </Routes>
 
       <div style={{ marginTop: 16, color: '#666' }}>
-        API Base URL: <code>{apiBase}</code>
+        {t('apiBaseLabel')}: <code>{apiBase}</code>
       </div>
       <div style={{ marginTop: 8, color: '#666' }}>
-        Backend статус:{' '}
-        <strong>{backendStatus === 'checking' ? 'проверка…' : backendStatus === 'ok' ? 'доступен' : 'недоступен'}</strong>
+        {t('backendStatusLabel')}:{' '}
+        <strong>
+          {backendStatus === 'checking'
+            ? t('backendStatusChecking')
+            : backendStatus === 'ok'
+              ? t('backendStatusOk')
+              : t('backendStatusDown')}
+        </strong>
       </div>
       {error && <div style={{ marginTop: 8, color: '#b00020' }}>{error}</div>}
     </Layout>

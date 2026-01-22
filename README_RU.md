@@ -32,5 +32,11 @@ docker compose exec postgres psql -U personalcrm -d personalcrm -c "SELECT to_re
 - Frontend: http://localhost:5173
 - Postgres: localhost:5432
 
+## Проверка русификации интерфейса
+```bash
+cd frontend
+npm run check:ru
+```
+
 Подробные проверки: docs/02_ACCEPTANCE_TESTS_RU.md
 

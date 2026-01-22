@@ -12,12 +12,42 @@ from app.services.db import execute, execute_returning_one, fetchall, fetchone
 from app.utils.pagination import decode_cursor, encode_cursor
 
 
-def _row_to_interaction(row: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+OWNER_ONLY_FIELDS = {"next_action"}
+LIMITED_FIELDS = {"outcome", "next_action"}
+REDACTION_DEFAULTS = {
+    "outcome": None,
+    "next_action": None,
+    "next_action_at": None,
+}
+
+
+def _redact_fields(data: Dict[str, Any], fields: set[str]) -> Dict[str, Any]:
+    for field in fields:
+        data[field] = REDACTION_DEFAULTS.get(field)
+    return data
+
+
+def _redact_interaction_dict(
+    data: Dict[str, Any],
+    ctx: WorkspaceContext,
+    interaction_visibility: str,
+    contact_visibility: Optional[str],
+) -> Dict[str, Any]:
+    if ctx.membership_role != "owner":
+        _redact_fields(data, OWNER_ONLY_FIELDS)
+        if interaction_visibility == "limited" or contact_visibility == "limited":
+            _redact_fields(data, LIMITED_FIELDS)
+    return data
+
+
+def _row_to_interaction(row: Dict[str, Any], ctx: WorkspaceContext) -> Dict[str, Any]:
+    interaction_visibility = row.get("visibility") or "shared"
+    contact_visibility = row.get("contact_visibility")
+    data = {
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
         "contact_id": str(row["contact_id"]),
-        "visibility": row.get("visibility") or "shared",
+        "visibility": interaction_visibility,
         "type": row.get("type"),
         "channel": row.get("channel"),
         "occurred_at": row.get("occurred_at").isoformat(),
@@ -29,6 +59,7 @@ def _row_to_interaction(row: Dict[str, Any]) -> Dict[str, Any]:
         "created_at": row.get("created_at").isoformat(),
         "updated_at": row.get("updated_at").isoformat(),
     }
+    return _redact_interaction_dict(data, ctx, interaction_visibility, contact_visibility)
 
 
 def list_interactions(
@@ -42,13 +73,14 @@ def list_interactions(
     types: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     params: List[Any] = [ctx.workspace_id]
-    where = ["workspace_id = %s", "deleted_at IS NULL"]
+    where = ["i.workspace_id = %s", "i.deleted_at IS NULL"]
 
     if ctx.membership_role != "owner":
-        where.append("visibility <> 'private'")
+        where.append("i.visibility <> 'private'")
+        where.append("(c.visibility IS NULL OR c.visibility <> 'private')")
 
     if contact_id:
-        where.append("contact_id = %s")
+        where.append("i.contact_id = %s")
         params.append(contact_id)
 
     if from_ts:
@@ -63,18 +95,19 @@ def list_interactions(
 
     if cursor:
         c = decode_cursor(cursor)
-        where.append("(occurred_at, created_at, id) < (%s, %s, %s)")
+        where.append("(i.occurred_at, i.created_at, i.id) < (%s, %s, %s)")
         params.extend([c["occurred_at"], c["created_at"], c["id"]])
 
-    sql = (
-        "SELECT * FROM interactions WHERE "
-        + " AND ".join(where)
-        + " ORDER BY occurred_at DESC, created_at DESC, id DESC LIMIT %s"
-    )
+    sql = """
+        SELECT i.*, c.visibility AS contact_visibility
+        FROM interactions i
+        LEFT JOIN contacts c ON c.id = i.contact_id AND c.deleted_at IS NULL
+        WHERE
+    """ + " AND ".join(where) + " ORDER BY i.occurred_at DESC, i.created_at DESC, i.id DESC LIMIT %s"
     params.append(limit)
 
     rows = fetchall(conn, sql, tuple(params))
-    data = [_row_to_interaction(r) for r in rows]
+    data = [_row_to_interaction(r, ctx) for r in rows]
 
     next_cur = None
     if len(rows) == limit:
@@ -128,14 +161,20 @@ def create_interaction(conn, ctx: WorkspaceContext, user: UserPrincipal, contact
 def get_interaction(conn, ctx: WorkspaceContext, interaction_id: str) -> Dict[str, Any]:
     row = fetchone(
         conn,
-        "SELECT * FROM interactions WHERE workspace_id = %s AND id = %s AND deleted_at IS NULL",
+        """
+        SELECT i.*, c.visibility AS contact_visibility
+        FROM interactions i
+        LEFT JOIN contacts c ON c.id = i.contact_id AND c.deleted_at IS NULL
+        WHERE i.workspace_id = %s AND i.id = %s AND i.deleted_at IS NULL
+        """,
         (ctx.workspace_id, interaction_id),
     )
     if not row:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Взаимодействие не найдено"})
-    if ctx.membership_role != "owner" and row.get("visibility") == "private":
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Запись приватная"})
-    return _row_to_interaction(row)
+    if ctx.membership_role != "owner":
+        if row.get("visibility") == "private" or row.get("contact_visibility") == "private":
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Взаимодействие не найдено"})
+    return _row_to_interaction(row, ctx)
 
 
 def update_interaction(conn, ctx: WorkspaceContext, user: UserPrincipal, interaction_id: str, payload: InteractionUpdate) -> Dict[str, Any]:

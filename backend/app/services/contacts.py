@@ -15,12 +15,30 @@ from app.services.db import execute, execute_returning_one, fetchall, fetchone
 from app.utils.pagination import decode_cursor, encode_cursor, next_cursor_if_any
 
 
-def _redact_contact_dict(data: Dict[str, Any], ctx: WorkspaceContext) -> Dict[str, Any]:
+OWNER_ONLY_FIELDS = {"private_notes", "trust_score", "emotional_balance"}
+LIMITED_FIELDS = {"shared_notes", "private_notes", "trust_score", "emotional_balance", "how_can_help", "how_i_can_help"}
+REDACTION_DEFAULTS = {
+    "private_notes": None,
+    "shared_notes": None,
+    "trust_score": None,
+    "emotional_balance": None,
+    "how_can_help": [],
+    "how_i_can_help": [],
+}
+
+
+def _redact_fields(data: Dict[str, Any], fields: set[str]) -> Dict[str, Any]:
+    for field in fields:
+        data[field] = REDACTION_DEFAULTS.get(field)
+    return data
+
+
+def _redact_contact_dict(data: Dict[str, Any], ctx: WorkspaceContext, visibility: str) -> Dict[str, Any]:
     if ctx.membership_role != "owner":
-        # assistant/collaborator: redact sensitive fields
-        data["private_notes"] = None
-        data["trust_score"] = None
-        data["emotional_balance"] = None
+        # assistant/collaborator: redact owner-only fields
+        _redact_fields(data, OWNER_ONLY_FIELDS)
+        if visibility == "limited":
+            _redact_fields(data, LIMITED_FIELDS)
     return data
 
 
@@ -95,16 +113,17 @@ def _organization_from_joined(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def _row_to_contact(conn, row: Dict[str, Any], ctx: WorkspaceContext) -> Dict[str, Any]:
+    visibility = row.get("visibility") or "shared"
     # Visibility enforcement
-    if ctx.membership_role != "owner" and row.get("visibility") == "private":
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Запись приватная"})
+    if ctx.membership_role != "owner" and visibility == "private":
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Контакт не найден"})
 
     context = row.get("context") or {}
 
     data = {
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
-        "visibility": row.get("visibility") or "shared",
+        "visibility": visibility,
         "first_name": row.get("first_name"),
         "last_name": row.get("last_name"),
         "middle_name": row.get("middle_name"),
@@ -134,7 +153,7 @@ def _row_to_contact(conn, row: Dict[str, Any], ctx: WorkspaceContext) -> Dict[st
         "created_at": row.get("created_at").isoformat(),
         "updated_at": row.get("updated_at").isoformat(),
     }
-    return _redact_contact_dict(data, ctx)
+    return _redact_contact_dict(data, ctx, visibility)
 
 
 def list_contacts(
