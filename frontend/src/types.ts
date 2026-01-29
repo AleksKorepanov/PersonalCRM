@@ -95,14 +95,52 @@ export type AuditEvent = {
   created_at: string
 }
 
+export type AssistantMessageCreate = {
+  target_type: 'contact' | 'reminder' | 'introduction'
+  target_id: string
+  task: string
+  reason?: string | null
+  due_at?: string | null
+}
+
 export type ApiRequestOptions = {
   method?: string
-  body?: Record<string, unknown>
+  body?: Record<string, unknown> | FormData
   params?: Record<string, string | number | undefined>
 }
 
-export type ImportContact = {
-  display_name: string
-  emails: string[]
-  phones: string[]
+export type ImportReport = {
+  imported: number
+  skipped: number
+  errors: Array<{ line: number; message: string }>
+}
+
+export type DuplicateGroup = {
+  reason: 'email' | 'phone' | 'name'
+  primary_contact: Contact
+  candidates: Contact[]
+}
+
+export type SearchProjectResult = {
+  id: string
+  name: string
+  status?: string | null
+}
+
+export type SearchIntroductionResult = {
+  id: string
+  status: string
+  requester_contact_id: string
+  introducer_contact_id: string
+  target_contact_id: string
+  requester_name?: string | null
+  introducer_name?: string | null
+  target_name?: string | null
+  created_at: string
+}
+
+export type SearchResults = {
+  contacts: Contact[]
+  projects: SearchProjectResult[]
+  introductions: SearchIntroductionResult[]
 }

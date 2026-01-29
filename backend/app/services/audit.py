@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, Optional, Set
 from app.core.deps import WorkspaceContext
 from app.core.security import UserPrincipal
 from app.services.db import execute
+from app.schemas.audit import AssistantMessageCreate
 
 
 def _json_default(value: Any):
@@ -107,3 +108,26 @@ def log_audit(
             json.dumps(audit_after, default=_json_default) if audit_after is not None else None,
         ),
     )
+
+
+def create_assistant_message(conn, ctx: WorkspaceContext, user: UserPrincipal, payload: AssistantMessageCreate) -> Dict[str, Any]:
+    after = {
+        "message_type": "assistant_message",
+        "target_type": payload.target_type,
+        "target_id": payload.target_id,
+        "task": payload.task,
+        "reason": payload.reason,
+        "due_at": payload.due_at,
+    }
+    log_audit(
+        conn,
+        ctx,
+        user,
+        action_key="assistant_message.create",
+        entity_type="interaction",
+        entity_id=payload.target_id,
+        before=None,
+        after=after,
+    )
+    conn.commit()
+    return after

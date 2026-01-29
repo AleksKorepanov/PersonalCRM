@@ -5,6 +5,7 @@ type AlertType = 'error' | 'info' | 'success'
 type AlertProps = {
   type?: AlertType
   children: React.ReactNode
+  dataTestId?: string
 }
 
 const typeStyles: Record<AlertType, React.CSSProperties> = {
@@ -13,9 +14,10 @@ const typeStyles: Record<AlertType, React.CSSProperties> = {
   success: { background: '#e6f6ec', color: '#1f5e3a', borderColor: '#bce5cc' },
 }
 
-export default function Alert({ type = 'info', children }: AlertProps) {
+export default function Alert({ type = 'info', children, dataTestId }: AlertProps) {
   return (
     <div
+      data-testid={dataTestId}
       style={{
         padding: '10px 12px',
         borderRadius: 8,

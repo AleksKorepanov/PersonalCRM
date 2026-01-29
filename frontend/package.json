@@ -9,7 +9,10 @@
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "lint": "tsc -b --noEmit",
     "test:e2e": "playwright test",
-    "check:ru": "rg -n \"\\\"[^\\\"]*\\b(Save|Cancel|Search|Create|Delete|Edit|Contact|Project)s?\\b[^\\\"]*\\\"|'[^']*\\b(Save|Cancel|Search|Create|Delete|Edit|Contact|Project)s?\\b[^']*'\" src && exit 1 || exit 0"
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "PWDEBUG=1 playwright test --project=chromium",
+    "test:e2e:report": "playwright show-report",
+    "check:ru": "rg -n \"\\\"[^\\\"]*\\b(Save|Cancel|Search|Create|Delete|Edit|Contact|Project|Reminder|Interaction|Introduction|Week|Panel|Status|Done|Close|Open|Settings|Update|Remove|Add|Send|Copy|Success|Error|Info|Loading|Retry|Owner|Assistant|Role|Filter|Import|Export|Follow-up)s?\\b[^\\\"]*\\\"|'[^']*\\b(Save|Cancel|Search|Create|Delete|Edit|Contact|Project|Reminder|Interaction|Introduction|Week|Panel|Status|Done|Close|Open|Settings|Update|Remove|Add|Send|Copy|Success|Error|Info|Loading|Retry|Owner|Assistant|Role|Filter|Import|Export|Follow-up)s?\\b[^']*'\" src | rg -v \"X-Debug-Role|data-testid|dataTestId\" && exit 1 || exit 0"
   },
   "dependencies": {
     "react": "^18.3.1",

@@ -111,3 +111,57 @@ curl -sSf "http://localhost:8000/api/v1/audit?workspace_id=${WORKSPACE_ID}&entit
 - Контакты с visibility=private отсутствуют в списке и недоступны по прямой ссылке.
 - В контакте с visibility=limited чувствительные поля скрыты.
 - Ассистент не имеет доступа к аудиту.
+
+## 10) Импорт CSV (dev-only)
+Импорт доступен только при `IMPORT_ENABLED=1`.
+
+```bash
+WORKSPACE_ID=$(curl -sSf http://localhost:8000/api/v1/me | node -e "const fs=require('fs');const data=JSON.parse(fs.readFileSync(0,'utf8'));console.log(data.workspaces[0].workspace.id)")
+
+cat > /tmp/contacts_import.csv <<'CSV'
+name,email,phone,company,tags
+Иван,ivan@example.com,+79990001122,Acme,"vip;lead"
+,bad@example.com,+79990002222,Acme,tag
+Петр,petr@example.com,+79990003344,Acme,tag2
+CSV
+
+curl -sSf -X POST "http://localhost:8000/api/v1/contacts/import?workspace_id=${WORKSPACE_ID}" \
+  -F "file=@/tmp/contacts_import.csv"
+```
+
+Ожидаемо: ответ с `imported: 2`, `skipped: 1`, и списком ошибок по строкам (на русском).
+
+## 11) Поиск дублей контактов (dev-only)
+Поиск дублей доступен только при `DUPLICATES_ENABLED=1`.
+
+```bash
+WORKSPACE_ID=$(curl -sSf http://localhost:8000/api/v1/me | node -e "const fs=require('fs');const data=JSON.parse(fs.readFileSync(0,'utf8'));console.log(data.workspaces[0].workspace.id)")
+
+curl -sSf "http://localhost:8000/api/v1/contacts/duplicates?workspace_id=${WORKSPACE_ID}"
+```
+
+Ожидаемо: ответ с массивом `groups`, где у каждой группы есть `primary_contact`, список `candidates` и `reason` (email/phone/name).
+
+## 12) Слияние контактов (dev-only)
+Слияние доступно только при `MERGE_ENABLED=1`.
+
+```bash
+WORKSPACE_ID=$(curl -sSf http://localhost:8000/api/v1/me | node -e "const fs=require('fs');const data=JSON.parse(fs.readFileSync(0,'utf8'));console.log(data.workspaces[0].workspace.id)")
+
+curl -sSf -X POST "http://localhost:8000/api/v1/contacts/merge?workspace_id=${WORKSPACE_ID}" \
+  -H "Content-Type: application/json" \
+  -d '{"primary_contact_id":"<UUID>","merge_contact_ids":["<UUID_1>","<UUID_2>"]}'
+```
+
+Ожидаемо: ответ содержит `primary_contact_id` и `merged_contact_ids`, а объединённые контакты имеют `deleted_at`.
+
+## 13) Глобальный поиск (dev-only)
+Поиск доступен только при `SEARCH_ENABLED=1`.
+
+```bash
+WORKSPACE_ID=$(curl -sSf http://localhost:8000/api/v1/me | node -e "const fs=require('fs');const data=JSON.parse(fs.readFileSync(0,'utf8'));console.log(data.workspaces[0].workspace.id)")
+
+curl -sSf "http://localhost:8000/api/v1/search?workspace_id=${WORKSPACE_ID}&q=Иван"
+```
+
+Ожидаемо: ответ с разделами `contacts/projects/introductions` (массивы результатов).

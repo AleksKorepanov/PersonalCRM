@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
+import AssistantMessageModal from '../components/AssistantMessageModal'
 import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
 import Select from '../components/ui/Select'
 import TextField from '../components/ui/TextField'
+import { useToast } from '../components/ui/Toast'
 import { t } from '../i18n/t'
-import type { Contact, Interaction, Reminder } from '../types'
+import type { AssistantMessageCreate, Contact, Interaction, Reminder } from '../types'
 import { applyTierToTags, loadCadenceConfig, parseTierFromTags, type CadenceTier } from '../utils/cadence'
 
 type ContactCardPageProps = {
@@ -42,6 +44,7 @@ type ContactCardPageProps = {
   }) => Promise<void>
   searchContacts: (query: string) => Promise<Contact[]>
   loadRemindersForContact: (contactId: string) => Promise<Reminder[]>
+  createAssistantMessage: (payload: AssistantMessageCreate) => Promise<void>
 }
 
 const toLocalInputValue = (date: Date) => {
@@ -62,14 +65,14 @@ export default function ContactCardPage({
   createIntroduction,
   searchContacts,
   loadRemindersForContact,
+  createAssistantMessage,
 }: ContactCardPageProps) {
   const { contactId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const [contact, setContact] = useState<Contact | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [editSubmitting, setEditSubmitting] = useState(false)
-  const [editError, setEditError] = useState<string | null>(null)
-  const [editSuccess, setEditSuccess] = useState<string | null>(null)
+  const toast = useToast()
   const [editForm, setEditForm] = useState({
     displayName: '',
     emails: '',
@@ -96,11 +99,47 @@ export default function ContactCardPage({
     return import.meta.env.DEV ? `${t('timelineLoadFailed')} ${t('timelineLoadFailedDetails')} ${detail}` : t('timelineLoadFailed')
   }
 
-  const [timelineSuccess, setTimelineSuccess] = useState<string | null>(null)
+  const downloadFile = (content: string, filename: string, mime: string) => {
+    const blob = new Blob([content], { type: mime })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const buildTimelineCsv = (items: Interaction[]) => {
+    const header = ['occurred_at', 'type', 'summary', 'outcome', 'next_action']
+    const rows = items.map((item) => {
+      const escape = (value: string) => `"${value.replace(/"/g, '""')}"`
+      return [
+        item.occurred_at || '',
+        item.type || '',
+        item.summary || '',
+        item.outcome || '',
+        item.next_action || '',
+      ]
+        .map((value) => escape(String(value)))
+        .join(',')
+    })
+    return [header.join(','), ...rows].join('\n')
+  }
+
+  const handleExportTimelineCsv = () => {
+    const csv = buildTimelineCsv(filteredTimeline)
+    downloadFile(csv, `timeline-${contactId || 'contact'}.csv`, 'text/csv;charset=utf-8')
+  }
+
+  const handleExportTimelineJson = () => {
+    downloadFile(JSON.stringify(filteredTimeline, null, 2), `timeline-${contactId || 'contact'}.json`, 'application/json;charset=utf-8')
+  }
+
   const [interactionModalOpen, setInteractionModalOpen] = useState(false)
   const [interactionSubmitting, setInteractionSubmitting] = useState(false)
   const [interactionErrors, setInteractionErrors] = useState<{ type?: string; occurredAt?: string }>({})
-  const [interactionSaveError, setInteractionSaveError] = useState<string | null>(null)
   const [interactionForm, setInteractionForm] = useState({
     type: 'meeting',
     occurredAt: toLocalInputValue(new Date()),
@@ -109,8 +148,6 @@ export default function ContactCardPage({
   })
   const [reminderModalOpen, setReminderModalOpen] = useState(false)
   const [reminderSubmitting, setReminderSubmitting] = useState(false)
-  const [reminderError, setReminderError] = useState<string | null>(null)
-  const [reminderSuccess, setReminderSuccess] = useState<string | null>(null)
   const [reminderForm, setReminderForm] = useState({
     title: '',
     dueAt: toLocalInputValue(new Date()),
@@ -118,8 +155,6 @@ export default function ContactCardPage({
   })
   const [introductionModalOpen, setIntroductionModalOpen] = useState(false)
   const [introductionSubmitting, setIntroductionSubmitting] = useState(false)
-  const [introductionError, setIntroductionError] = useState<string | null>(null)
-  const [introductionSuccess, setIntroductionSuccess] = useState<string | null>(null)
   const [contactSearchQuery, setContactSearchQuery] = useState('')
   const [contactSearchResults, setContactSearchResults] = useState<Contact[]>([])
   const [selectedTargetName, setSelectedTargetName] = useState('')
@@ -132,6 +167,8 @@ export default function ContactCardPage({
   const [timelineTypes, setTimelineTypes] = useState<string[]>([])
   const [timelinePeriod, setTimelinePeriod] = useState('30')
   const actionHandledRef = useRef(false)
+  const [assistantModalOpen, setAssistantModalOpen] = useState(false)
+  const [assistantSubmitting, setAssistantSubmitting] = useState(false)
 
   const tabs = useMemo(
     () => [
@@ -170,10 +207,20 @@ export default function ContactCardPage({
     const action = searchParams.get('action')
     if (!action) return
     if (action === 'interaction') {
-      openInteractionModal()
+      const rawType = searchParams.get('interaction_type') || undefined
+      const presetSummary = searchParams.get('interaction_summary') || undefined
+      const presetNextAction = searchParams.get('interaction_next') || undefined
+      openInteractionModal({
+        type: rawType || undefined,
+        summary: presetSummary || undefined,
+        nextAction: presetNextAction || undefined,
+      })
       actionHandledRef.current = true
       const next = new URLSearchParams(searchParams)
       next.delete('action')
+      next.delete('interaction_type')
+      next.delete('interaction_summary')
+      next.delete('interaction_next')
       next.set('tab', 'timeline')
       setSearchParams(next, { replace: true })
       return
@@ -208,7 +255,6 @@ export default function ContactCardPage({
 
   useEffect(() => {
     if (!contactId || activeTab !== 'timeline') return
-    setTimelineSuccess(null)
     setTimelineLoading(true)
     setTimelineError(null)
     loadInteractions(contactId)
@@ -235,15 +281,32 @@ export default function ContactCardPage({
     return () => window.clearTimeout(timeout)
   }, [contactSearchQuery, introductionModalOpen, searchContacts])
 
-  const openInteractionModal = () => {
+  const normalizeInteractionType = (value: string) => {
+    const trimmed = value.trim()
+    const allowed = new Set(['meeting', 'call', 'message', 'event', 'intro', 'help_given', 'help_received', 'note'])
+    if (allowed.has(trimmed)) return trimmed
+    const labelMap = new Map<string, string>([
+      [t('timelineTypeMeeting'), 'meeting'],
+      [t('timelineTypeCall'), 'call'],
+      [t('timelineTypeMessage'), 'message'],
+      [t('timelineTypeEvent'), 'event'],
+      [t('timelineTypeIntro'), 'intro'],
+      [t('timelineTypeHelpGiven'), 'help_given'],
+      [t('timelineTypeHelpReceived'), 'help_received'],
+      [t('timelineTypeNote'), 'note'],
+    ])
+    return labelMap.get(trimmed) ?? null
+  }
+
+  const openInteractionModal = (preset?: Partial<typeof interactionForm>) => {
+    const presetType = preset?.type ? normalizeInteractionType(preset.type) : null
     setInteractionForm({
-      type: 'meeting',
-      occurredAt: toLocalInputValue(new Date()),
-      summary: '',
-      nextAction: '',
+      type: presetType ?? 'meeting',
+      occurredAt: preset?.occurredAt ?? toLocalInputValue(new Date()),
+      summary: preset?.summary ?? '',
+      nextAction: preset?.nextAction ?? '',
     })
     setInteractionErrors({})
-    setInteractionSaveError(null)
     setInteractionModalOpen(true)
   }
 
@@ -254,7 +317,6 @@ export default function ContactCardPage({
       dueAt: toLocalInputValue(new Date()),
       body: '',
     })
-    setReminderError(null)
     setReminderModalOpen(true)
   }
 
@@ -268,14 +330,14 @@ export default function ContactCardPage({
       criteria: '',
       message: '',
     })
-    setIntroductionError(null)
     setIntroductionModalOpen(true)
   }
 
   const saveInteraction = async () => {
     if (!contactId) return
     const errors: { type?: string; occurredAt?: string } = {}
-    if (!interactionForm.type) {
+    const normalizedType = normalizeInteractionType(interactionForm.type || '')
+    if (!normalizedType) {
       errors.type = t('timelineValidationType')
     }
     if (!interactionForm.occurredAt) {
@@ -289,10 +351,9 @@ export default function ContactCardPage({
     if (Object.keys(errors).length > 0) return
 
     setInteractionSubmitting(true)
-    setInteractionSaveError(null)
     try {
       await createInteraction(contactId, {
-        type: interactionForm.type,
+        type: normalizedType,
         occurred_at: occurredAtDate.toISOString(),
         summary: interactionForm.summary.trim() || undefined,
         next_action: interactionForm.nextAction.trim() || undefined,
@@ -301,11 +362,13 @@ export default function ContactCardPage({
       next.set('tab', 'timeline')
       setSearchParams(next)
       setInteractionModalOpen(false)
-      setTimelineSuccess(t('timelineAddSuccess'))
+      toast.success(t('toastSaved'))
       const items = await loadInteractions(contactId)
       setTimeline(items)
-    } catch {
-      setInteractionSaveError(t('timelineSaveFailed'))
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      const message = import.meta.env.DEV && detail ? `${t('toastActionFailed')}: ${detail}` : t('toastActionFailed')
+      toast.error(message)
     } finally {
       setInteractionSubmitting(false)
     }
@@ -315,11 +378,10 @@ export default function ContactCardPage({
     if (!contactId) return
     const dueDate = new Date(reminderForm.dueAt)
     if (!reminderForm.dueAt || Number.isNaN(dueDate.getTime())) {
-      setReminderError(t('remindersValidationDate'))
+      toast.error(t('toastActionFailed'))
       return
     }
     setReminderSubmitting(true)
-    setReminderError(null)
     try {
       await createReminder(contactId, {
         title: reminderForm.title.trim() || undefined,
@@ -327,10 +389,10 @@ export default function ContactCardPage({
         due_at: dueDate.toISOString(),
       })
       setReminderModalOpen(false)
-      setReminderSuccess(t('remindersCreated'))
+      toast.success(t('toastSaved'))
       onReminderCreated()
     } catch {
-      setReminderError(t('remindersSaveFailed'))
+      toast.error(t('toastActionFailed'))
     } finally {
       setReminderSubmitting(false)
     }
@@ -339,15 +401,14 @@ export default function ContactCardPage({
   const saveIntroduction = async () => {
     if (!contact) return
     if (!introductionForm.targetContactId) {
-      setIntroductionError(t('introductionsValidationTarget'))
+      toast.error(t('toastActionFailed'))
       return
     }
     if (!introductionForm.ask.trim()) {
-      setIntroductionError(t('introductionsValidationGoal'))
+      toast.error(t('toastActionFailed'))
       return
     }
     setIntroductionSubmitting(true)
-    setIntroductionError(null)
     try {
       await createIntroduction({
         requester_contact_id: contact.id,
@@ -358,9 +419,9 @@ export default function ContactCardPage({
         benefit_for_target: introductionForm.message.trim() || undefined,
       })
       setIntroductionModalOpen(false)
-      setIntroductionSuccess(t('introductionsCreated'))
+      toast.success(t('toastSaved'))
     } catch {
-      setIntroductionError(t('introductionsSaveFailed'))
+      toast.error(t('toastActionFailed'))
     } finally {
       setIntroductionSubmitting(false)
     }
@@ -483,13 +544,35 @@ export default function ContactCardPage({
     ? `${t('contactHeaderActionContactBy')} ${new Date(nextReminder.due_at).toLocaleString()}`
     : t('contactHeaderActionAddInteraction')
 
+  const handleAssistantMessageSubmit = async (payload: { task: string; reason?: string; due_at?: string }) => {
+    if (!contact || assistantSubmitting) return
+    setAssistantSubmitting(true)
+    try {
+      await createAssistantMessage({
+        target_type: 'contact',
+        target_id: contact.id,
+        task: payload.task,
+        reason: payload.reason,
+        due_at: payload.due_at,
+      })
+      toast.success(t('assistantMessageSent'))
+      setAssistantModalOpen(false)
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      const message = import.meta.env.DEV && detail ? `${t('assistantMessageFailed')}: ${detail}` : t('assistantMessageFailed')
+      toast.error(message)
+    } finally {
+      setAssistantSubmitting(false)
+    }
+  }
+
   return (
     <section style={{ marginTop: 16 }}>
       <Link to="/contacts" style={{ textDecoration: 'none', color: '#1f5eff' }}>
         {t('contactBackToList')}
       </Link>
 
-      <div style={{ marginTop: 12 }}>
+      <div style={{ marginTop: 12 }} data-testid="contact-header">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <h2 style={{ marginBottom: 6 }}>{t('contactCardTitle')}</h2>
           {contact &&
@@ -499,9 +582,8 @@ export default function ContactCardPage({
                   variant="secondary"
                   onClick={() => {
                     setIsEditing(false)
-                    setEditError(null)
-                    setEditSuccess(null)
                   }}
+                  dataTestId="contact-edit-cancel"
                 >
                   {t('contactEditCancel')}
                 </Button>
@@ -509,12 +591,10 @@ export default function ContactCardPage({
                   onClick={async () => {
                     if (!contact) return
                     if (!editForm.displayName.trim()) {
-                      setEditError(t('contactEditNameRequired'))
+                      toast.error(t('toastActionFailed'))
                       return
                     }
                     setEditSubmitting(true)
-                    setEditError(null)
-                    setEditSuccess(null)
                     try {
                       const normalizedTier =
                         editForm.tier === 'A' || editForm.tier === 'B' || editForm.tier === 'C'
@@ -540,48 +620,48 @@ export default function ContactCardPage({
                       const updated = await updateContact(contact.id, payload)
                       if (updated) {
                         setContact(updated)
-                        setEditSuccess(t('contactEditSuccess'))
+                        toast.success(t('toastSaved'))
                         setIsEditing(false)
                       }
                     } catch (err) {
                       const detail = err instanceof Error ? err.message : String(err)
-                      setEditError(
-                        import.meta.env.DEV
-                          ? `${t('contactEditError')} ${t('contactCreateErrorDetails')} ${detail}`
-                          : t('contactEditError'),
-                      )
+                      const message = import.meta.env.DEV && detail ? `${t('toastActionFailed')}: ${detail}` : t('toastActionFailed')
+                      toast.error(message)
                     } finally {
                       setEditSubmitting(false)
                     }
                   }}
                   loading={editSubmitting}
                   loadingLabel={t('contactsSavingLabel')}
+                  dataTestId="contact-edit-save"
                 >
                   {t('contactEditSave')}
                 </Button>
               </div>
             ) : (
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  if (!contact) return
-                  setEditForm(buildEditForm(contact))
-                  setEditError(null)
-                  setEditSuccess(null)
-                  setIsEditing(true)
-                }}
-              >
-                {t('contactEditButton')}
-              </Button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {role === 'assistant' && (
+                  <Button variant="secondary" onClick={() => setAssistantModalOpen(true)}>
+                    {t('assistantMessageButton')}
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    if (!contact) return
+                    setEditForm(buildEditForm(contact))
+                    setIsEditing(true)
+                  }}
+                  dataTestId="contact-edit"
+                >
+                  {t('contactEditButton')}
+                </Button>
+              </div>
             ))}
         </div>
         {loading && <Alert type="info">{t('contactsLoading')}</Alert>}
         {error && <Alert type="error">{t('contactsLoadFailed')}</Alert>}
         {!loading && !contact && !error && <Alert type="info">{t('timelineContactMissing')}</Alert>}
-        {reminderSuccess && <Alert type="success">{reminderSuccess}</Alert>}
-        {introductionSuccess && <Alert type="success">{introductionSuccess}</Alert>}
-        {editSuccess && <Alert type="success">{editSuccess}</Alert>}
-        {editError && <Alert type="error">{editError}</Alert>}
       </div>
 
       {contact && (
@@ -628,6 +708,7 @@ export default function ContactCardPage({
                 <button
                   key={tab.key}
                   type="button"
+                  data-testid={`tab-${tab.key}`}
                   onClick={() => {
                     const next = new URLSearchParams(searchParams)
                     next.set('tab', tab.key)
@@ -653,7 +734,9 @@ export default function ContactCardPage({
           {activeTab === 'profile' ? (
             <div style={{ display: 'grid', gap: 16 }}>
               {isLimitedForAssistant && (
-                <Alert type="info">{t('contactLimitedNotice')}</Alert>
+                <Alert type="info" dataTestId="contact-limited-notice">
+                  {t('contactLimitedNotice')}
+                </Alert>
               )}
               <div
                 style={{
@@ -670,9 +753,12 @@ export default function ContactCardPage({
                       label={t('contactsFieldNameLabel')}
                       value={editForm.displayName}
                       onChange={(value) => setEditForm((prev) => ({ ...prev, displayName: value }))}
+                      dataTestId="contact-edit-name"
                     />
                   ) : (
-                    <div style={{ fontSize: 22, fontWeight: 600 }}>{contact.display_name}</div>
+                <div style={{ fontSize: 22, fontWeight: 600 }} data-testid="contact-name">
+                  {contact.display_name}
+                </div>
                   )}
                   {company && (
                     <div style={{ marginTop: 4, color: '#666' }}>
@@ -707,13 +793,13 @@ export default function ContactCardPage({
                 <div style={{ display: 'grid', gap: 8 }}>
                   <div style={{ fontSize: 13, color: '#666' }}>{t('contactQuickActionsLabel')}</div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <Button variant="secondary" onClick={openInteractionModal}>
+                    <Button variant="secondary" onClick={openInteractionModal} dataTestId="add-interaction">
                       {t('contactActionAddInteraction')}
                     </Button>
-                    <Button variant="secondary" onClick={openReminderModal}>
+                    <Button variant="secondary" onClick={openReminderModal} dataTestId="add-reminder">
                       {t('contactActionSetReminder')}
                     </Button>
-                    <Button variant="secondary" onClick={openIntroductionModal}>
+                    <Button variant="secondary" onClick={openIntroductionModal} dataTestId="add-introduction">
                       {t('contactActionCreateIntroduction')}
                     </Button>
                   </div>
@@ -911,14 +997,24 @@ export default function ContactCardPage({
             </div>
           ) : activeTab === 'timeline' ? (
             <div style={{ display: 'grid', gap: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                 <div style={{ fontWeight: 600 }}>{t('contactTabTimeline')}</div>
-                <Button onClick={openInteractionModal}>{t('contactActionAddInteraction')}</Button>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <Button variant="secondary" onClick={handleExportTimelineCsv}>
+                    {t('timelineExportCsv')}
+                  </Button>
+                  <Button variant="secondary" onClick={handleExportTimelineJson}>
+                    {t('timelineExportJson')}
+                  </Button>
+                  <Button onClick={openInteractionModal} dataTestId="add-interaction">
+                    {t('contactActionAddInteraction')}
+                  </Button>
+                </div>
               </div>
               <div style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 10, display: 'grid', gap: 10 }}>
                 <div style={{ fontWeight: 600 }}>{t('timelineFiltersTitle')}</div>
                 <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-                  <div style={{ display: 'grid', gap: 6 }}>
+                  <div style={{ display: 'grid', gap: 6 }} data-testid="timeline-filter-types">
                     <div style={{ fontSize: 13, color: '#333' }}>{t('timelineFilterTypes')}</div>
                     <div style={{ display: 'grid', gap: 6 }}>
                       {[
@@ -930,6 +1026,7 @@ export default function ContactCardPage({
                         <label key={option.value} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                           <input
                             type="checkbox"
+                            data-testid={`timeline-filter-${option.value}`}
                             checked={timelineTypes.includes(option.value)}
                             onChange={(event) => {
                               if (event.target.checked) {
@@ -953,6 +1050,7 @@ export default function ContactCardPage({
                       { value: '30', label: t('timelinePeriod30') },
                       { value: '90', label: t('timelinePeriod90') },
                     ]}
+                    dataTestId="timeline-filter-period"
                   />
                 </div>
                 <div style={{ fontSize: 13, color: '#666' }}>
@@ -968,7 +1066,6 @@ export default function ContactCardPage({
                       variant="secondary"
                       onClick={() => {
                         if (!contactId) return
-                        setTimelineSuccess(null)
                         setTimelineLoading(true)
                         setTimelineError(null)
                         loadInteractions(contactId)
@@ -985,37 +1082,38 @@ export default function ContactCardPage({
                   </div>
                 </Alert>
               )}
-              {!timelineLoading && !timelineError && filteredTimeline.length === 0 && (
-                <div style={{ padding: 12, border: '1px dashed #ddd', borderRadius: 8 }}>{t('timelineEmpty')}</div>
-              )}
-              {timelineSuccess && <Alert type="success">{timelineSuccess}</Alert>}
-              {!timelineLoading && !timelineError && filteredTimeline.length > 0 && (
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {[...filteredTimeline]
-                    .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
-                    .map((item) => (
-                    <div
-                      key={item.id}
-                      style={{
-                        padding: 12,
-                        borderRadius: 10,
-                        border: '1px solid #e5e7eb',
-                        display: 'grid',
-                        gap: 6,
-                        fontSize: 14,
-                      }}
-                    >
-                      <div style={{ color: '#666' }}>
-                        {new Date(item.occurred_at).toLocaleString()} • {formatInteractionType(item.type)}
-                      </div>
-                      {item.summary && <div>{item.summary}</div>}
-                      {item.outcome && (
-                        <div>
-                          {t('timelineItemOutcome')}: {item.outcome}
+              {!timelineLoading && !timelineError && (
+                <div style={{ display: 'grid', gap: 8 }} data-testid="timeline-list">
+                  {filteredTimeline.length === 0 ? (
+                    <div style={{ padding: 12, border: '1px dashed #ddd', borderRadius: 8 }}>{t('timelineEmpty')}</div>
+                  ) : (
+                    [...filteredTimeline]
+                      .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
+                      .map((item) => (
+                        <div
+                          key={item.id}
+                          data-testid={`timeline-item-${item.id}`}
+                          style={{
+                            padding: 12,
+                            borderRadius: 10,
+                            border: '1px solid #e5e7eb',
+                            display: 'grid',
+                            gap: 6,
+                            fontSize: 14,
+                          }}
+                        >
+                          <div style={{ color: '#666' }}>
+                            {new Date(item.occurred_at).toLocaleString()} • {formatInteractionType(item.type)}
+                          </div>
+                          {item.summary && <div>{item.summary}</div>}
+                          {item.outcome && (
+                            <div>
+                              {t('timelineItemOutcome')}: {item.outcome}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  ))}
+                      ))
+                  )}
                 </div>
               )}
             </div>
@@ -1039,6 +1137,7 @@ export default function ContactCardPage({
           }}
         >
           <div
+            data-testid="timeline-add-modal"
             style={{
               width: '100%',
               maxWidth: 520,
@@ -1055,6 +1154,7 @@ export default function ContactCardPage({
                 value={interactionForm.type}
                 onChange={(value) => setInteractionForm((prev) => ({ ...prev, type: value }))}
                 error={interactionErrors.type}
+                dataTestId="interaction-type"
                 options={[
                   { value: 'meeting', label: t('timelineTypeMeeting') },
                   { value: 'call', label: t('timelineTypeCall') },
@@ -1068,18 +1168,19 @@ export default function ContactCardPage({
                 onChange={(value) => setInteractionForm((prev) => ({ ...prev, occurredAt: value }))}
                 error={interactionErrors.occurredAt}
                 type="datetime-local"
+                dataTestId="interaction-datetime"
               />
               <TextField
                 label={t('timelineFieldSummary')}
                 value={interactionForm.summary}
                 onChange={(value) => setInteractionForm((prev) => ({ ...prev, summary: value }))}
+                dataTestId="interaction-notes"
               />
               <TextField
                 label={t('timelineFieldNextAction')}
                 value={interactionForm.nextAction}
                 onChange={(value) => setInteractionForm((prev) => ({ ...prev, nextAction: value }))}
               />
-              {interactionSaveError && <Alert type="error">{interactionSaveError}</Alert>}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <Button variant="secondary" onClick={() => setInteractionModalOpen(false)}>
                   {t('timelineCancel')}
@@ -1088,6 +1189,7 @@ export default function ContactCardPage({
                   onClick={saveInteraction}
                   loading={interactionSubmitting}
                   loadingLabel={t('contactsSavingLabel')}
+                  dataTestId="interaction-save"
                 >
                   {t('timelineSave')}
                 </Button>
@@ -1111,6 +1213,7 @@ export default function ContactCardPage({
           }}
         >
           <div
+            data-testid="reminder-create"
             style={{
               width: '100%',
               maxWidth: 520,
@@ -1132,13 +1235,13 @@ export default function ContactCardPage({
                 value={reminderForm.dueAt}
                 onChange={(value) => setReminderForm((prev) => ({ ...prev, dueAt: value }))}
                 type="datetime-local"
+                dataTestId="reminder-due"
               />
               <TextField
                 label={t('remindersCommentLabel')}
                 value={reminderForm.body}
                 onChange={(value) => setReminderForm((prev) => ({ ...prev, body: value }))}
               />
-              {reminderError && <Alert type="error">{reminderError}</Alert>}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <Button variant="secondary" onClick={() => setReminderModalOpen(false)}>
                   {t('remindersCancel')}
@@ -1147,6 +1250,7 @@ export default function ContactCardPage({
                   onClick={saveReminder}
                   loading={reminderSubmitting}
                   loadingLabel={t('contactsSavingLabel')}
+                  dataTestId="reminder-save"
                 >
                   {t('remindersSave')}
                 </Button>
@@ -1170,6 +1274,7 @@ export default function ContactCardPage({
           }}
         >
           <div
+            data-testid="introduction-create"
             style={{
               width: '100%',
               maxWidth: 560,
@@ -1190,6 +1295,7 @@ export default function ContactCardPage({
                   setIntroductionForm((prev) => ({ ...prev, targetContactId: '' }))
                   setSelectedTargetName('')
                 }}
+                dataTestId="intro-target"
               />
               {selectedTargetName && (
                 <div style={{ fontSize: 13, color: '#666' }}>
@@ -1205,6 +1311,7 @@ export default function ContactCardPage({
                     <button
                       key={item.id}
                       type="button"
+                      data-testid={`intro-target-${item.id}`}
                       onClick={() => {
                         setIntroductionForm((prev) => ({ ...prev, targetContactId: item.id }))
                         setContactSearchQuery(item.display_name)
@@ -1234,18 +1341,20 @@ export default function ContactCardPage({
                 label={t('introductionsGoalLabel')}
                 value={introductionForm.ask}
                 onChange={(value) => setIntroductionForm((prev) => ({ ...prev, ask: value }))}
+                dataTestId="intro-goal"
               />
               <TextField
                 label={t('introductionsCriteriaLabel')}
                 value={introductionForm.criteria}
                 onChange={(value) => setIntroductionForm((prev) => ({ ...prev, criteria: value }))}
+                dataTestId="intro-criteria"
               />
               <TextField
                 label={t('introductionsMessageLabel')}
                 value={introductionForm.message}
                 onChange={(value) => setIntroductionForm((prev) => ({ ...prev, message: value }))}
+                dataTestId="intro-message"
               />
-              {introductionError && <Alert type="error">{introductionError}</Alert>}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <Button variant="secondary" onClick={() => setIntroductionModalOpen(false)}>
                   {t('introductionsCancel')}
@@ -1254,6 +1363,7 @@ export default function ContactCardPage({
                   onClick={saveIntroduction}
                   loading={introductionSubmitting}
                   loadingLabel={t('contactsSavingLabel')}
+                  dataTestId="intro-save"
                 >
                   {t('introductionsSave')}
                 </Button>
@@ -1262,6 +1372,13 @@ export default function ContactCardPage({
           </div>
         </div>
       )}
+      <AssistantMessageModal
+        open={assistantModalOpen}
+        targetLabel={contact ? `${t('assistantMessageTargetContact')}: ${contact.display_name}` : null}
+        submitting={assistantSubmitting}
+        onClose={() => setAssistantModalOpen(false)}
+        onSubmit={handleAssistantMessageSubmit}
+      />
     </section>
   )
 }

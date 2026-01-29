@@ -124,3 +124,8 @@ class ContactUpdate(BaseModel):
     private_notes: Optional[str] = None
 
     next_touch_at: Optional[str] = None
+
+
+class ContactMergeRequest(BaseModel):
+    primary_contact_id: str
+    merge_contact_ids: List[str] = []

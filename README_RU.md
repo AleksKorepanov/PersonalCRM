@@ -38,5 +38,17 @@ cd frontend
 npm run check:ru
 ```
 
+## E2E тесты (Playwright)
+```bash
+cd frontend
+npm run test:e2e
+```
+
+Отчёт:
+```bash
+cd frontend
+npm run test:e2e:report
+```
+
 Подробные проверки: docs/02_ACCEPTANCE_TESTS_RU.md
 

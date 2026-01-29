@@ -32,8 +32,8 @@ const toLabel = (value: string | null | undefined, fallback = t('emptyValue')) =
 export default function AuditPage({ role, apiRequest }: AuditPageProps) {
   if (role === 'assistant') {
     return (
-      <section style={{ marginTop: 16 }}>
-        <h2>{t('auditNoAccessTitle')}</h2>
+      <section style={{ marginTop: 16 }} data-testid="audit-page">
+        <h2 data-testid="audit-no-access">{t('auditNoAccessTitle')}</h2>
         <div style={{ color: '#666' }}>{t('auditNoAccessDescription')}</div>
       </section>
     )
@@ -99,7 +99,7 @@ export default function AuditPage({ role, apiRequest }: AuditPageProps) {
   )
 
   return (
-    <section style={{ marginTop: 16 }}>
+    <section style={{ marginTop: 16 }} data-testid="audit-page">
       <h2>{t('menuAudit')}</h2>
       <div style={{ marginTop: 12, padding: 12, border: '1px solid #e5e7eb', borderRadius: 12 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>{t('auditFiltersTitle')}</div>
@@ -109,13 +109,15 @@ export default function AuditPage({ role, apiRequest }: AuditPageProps) {
             value={fromDate}
             onChange={setFromDate}
             type="date"
+            dataTestId="audit-filter-date"
           />
-          <TextField label={t('auditFilterTo')} value={toDate} onChange={setToDate} type="date" />
+          <TextField label={t('auditFilterTo')} value={toDate} onChange={setToDate} type="date" dataTestId="audit-filter-date" />
           <Select
             label={t('auditFilterEntity')}
             value={entityType}
             onChange={setEntityType}
             options={entityOptions}
+            dataTestId="audit-filter-entity"
           />
           <TextField
             label={t('auditFilterUser')}
@@ -125,7 +127,9 @@ export default function AuditPage({ role, apiRequest }: AuditPageProps) {
           />
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <Button onClick={loadAudit}>{t('auditApply')}</Button>
+          <Button onClick={loadAudit} dataTestId="audit-apply">
+            {t('auditApply')}
+          </Button>
           <Button
             variant="secondary"
             onClick={() => {
@@ -136,13 +140,14 @@ export default function AuditPage({ role, apiRequest }: AuditPageProps) {
               setItems([])
               setError(null)
             }}
+            dataTestId="audit-reset"
           >
             {t('auditReset')}
           </Button>
         </div>
       </div>
 
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 16 }} data-testid="audit-table">
         {loading && <Alert type="info">{t('auditLoading')}</Alert>}
         {error && <Alert type="error">{error}</Alert>}
         {!loading && !error && rows.length === 0 && (
@@ -191,7 +196,7 @@ export default function AuditPage({ role, apiRequest }: AuditPageProps) {
                       </tr>
                       {isExpanded && (
                         <tr style={{ background: '#fbfbfd', borderTop: '1px solid #eef0f2' }}>
-                          <td colSpan={7} style={{ padding: '12px 16px' }}>
+                          <td colSpan={7} style={{ padding: '12px 16px' }} data-testid="audit-details">
                             <div style={{ fontWeight: 600, marginBottom: 8 }}>{t('auditDetailsTitle')}</div>
                             <div style={{ display: 'grid', gap: 12 }}>
                               <div>

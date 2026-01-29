@@ -4,6 +4,8 @@ import Layout from './components/Layout'
 import { t } from './i18n/t'
 import ContactCardPage from './pages/ContactCardPage'
 import ContactsPage from './pages/ContactsPage'
+import DuplicatesPage from './pages/DuplicatesPage'
+import TodayPage from './pages/TodayPage'
 import AuditPage from './pages/AuditPage'
 import PlaceholderPage from './pages/PlaceholderPage'
 import RemindersPage from './pages/RemindersPage'
@@ -12,7 +14,18 @@ import StaleContactsPage from './pages/StaleContactsPage'
 import WeekPanelPage from './pages/WeekPanelPage'
 import StrategyPage from './pages/StrategyPage'
 import TimelinePage from './pages/TimelinePage'
-import type { ApiRequestOptions, Contact, ImportContact, Interaction, MeResponse, Reminder } from './types'
+import { ToastProvider } from './components/ui/Toast'
+import type {
+  ApiRequestOptions,
+  AssistantMessageCreate,
+  Contact,
+  DuplicateGroup,
+  ImportReport,
+  Interaction,
+  MeResponse,
+  Reminder,
+  SearchResults,
+} from './types'
 
 export default function App() {
   const apiBase = useMemo(() => import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000', [])
@@ -40,7 +53,6 @@ export default function App() {
     phone: '',
   })
   const [contactError, setContactError] = useState<string | null>(null)
-  const [importStatus, setImportStatus] = useState<string | null>(null)
   const [contactFormErrors, setContactFormErrors] = useState<{ displayName?: string; email?: string; phone?: string }>({})
   const [contactSubmitError, setContactSubmitError] = useState<string | null>(null)
   const [contactSubmitting, setContactSubmitting] = useState(false)
@@ -62,6 +74,9 @@ export default function App() {
     dueAt: new Date().toISOString(),
   })
   const [reminderError, setReminderError] = useState<string | null>(null)
+  const [searchResults, setSearchResults] = useState<SearchResults | null>(null)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
 
   const apiRequest = useCallback(
     async <T,>(path: string, options: ApiRequestOptions = {}): Promise<T> => {
@@ -77,13 +92,14 @@ export default function App() {
           }
         })
       }
+      const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
       const response = await fetch(url.toString(), {
         method,
         headers: {
-          'Content-Type': 'application/json',
+          ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
           ...(isDevMode ? { 'X-Debug-Role': debugRole } : {}),
         },
-        body: body ? JSON.stringify(body) : undefined,
+        body: isFormData ? body : body ? JSON.stringify(body) : undefined,
       })
       const text = await response.text()
       let payload: unknown = null
@@ -93,21 +109,64 @@ export default function App() {
         payload = text
       }
       if (!response.ok) {
+        const errorPayload =
+          typeof payload === 'object' && payload && 'error' in payload
+            ? (payload as { error?: { message?: string; details?: { errors?: Array<{ loc?: unknown[]; msg?: string }> } } }).error
+            : undefined
+        const details =
+          errorPayload?.details?.errors
+            ?.map((item) => {
+              const loc = item.loc ? item.loc.join('.') : ''
+              const msg = item.msg || ''
+              return loc && msg ? `${loc}: ${msg}` : loc || msg
+            })
+            .filter(Boolean)
+            .join('; ')
+        const detailMessage =
+          typeof payload === 'object' && payload && 'detail' in payload
+            ? (payload as { detail?: { message?: string } | string }).detail
+            : undefined
         const message =
-          typeof payload === 'object' && payload
-            ? 'error' in payload
-              ? (payload as { error?: { message?: string } }).error?.message
-              : 'message' in payload
-                ? (payload as { message?: string }).message
-                : undefined
-            : typeof payload === 'string'
-              ? payload
-              : undefined
-        throw new Error(message || `${t('apiErrorPrefix')}: ${response.status}`)
+          errorPayload?.message ||
+          (typeof detailMessage === 'object' && detailMessage ? detailMessage.message : undefined) ||
+          (typeof detailMessage === 'string' ? detailMessage : undefined) ||
+          (typeof payload === 'object' && payload && 'message' in payload ? (payload as { message?: string }).message : undefined) ||
+          (typeof payload === 'string' ? payload : undefined)
+        const combined = details ? `${message ?? t('apiErrorPrefix')}: ${details}` : message
+        throw new Error(combined || `${t('apiErrorPrefix')}: ${response.status}`)
       }
       return payload as T
     },
     [apiBase, workspaceId, debugRole, isDevMode],
+  )
+
+  const fetchWorkspaceId = useCallback(async () => {
+    const response = await fetch(`${apiBase}/api/v1/me`, {
+      headers: isDevMode ? { 'X-Debug-Role': debugRole } : undefined,
+    })
+    if (!response.ok) {
+      throw new Error(t('workspaceMissing'))
+    }
+    const data = (await response.json()) as MeResponse
+    setMe(data)
+    const wsId = data.workspaces[0]?.workspace.id || null
+    setWorkspaceId(wsId)
+    return wsId
+  }, [apiBase, debugRole, isDevMode])
+
+  const createAssistantMessage = useCallback(
+    async (payload: AssistantMessageCreate) => {
+      const wsId = workspaceId || (await fetchWorkspaceId())
+      if (!wsId) {
+        throw new Error(t('workspaceMissing'))
+      }
+      await apiRequest('/api/v1/assistant/messages', {
+        method: 'POST',
+        body: payload,
+        params: { workspace_id: wsId },
+      })
+    },
+    [apiRequest, fetchWorkspaceId, workspaceId],
   )
 
   useEffect(() => {
@@ -122,23 +181,11 @@ export default function App() {
         if (isMounted) setBackendStatus('down')
       })
 
-    fetch(`${apiBase}/api/v1/me`, {
-      headers: isDevMode ? { 'X-Debug-Role': debugRole } : undefined,
-    })
-      .then(async (r) => {
-        if (!r.ok) throw new Error(await r.text())
-        return r.json()
-      })
-      .then((data: MeResponse) => {
-        if (!isMounted) return
-        setMe(data)
-        setWorkspaceId(data.workspaces[0]?.workspace.id || null)
-      })
-      .catch((e) => setError(String(e)))
+    fetchWorkspaceId().catch((e) => setError(String(e)))
     return () => {
       isMounted = false
     }
-  }, [apiBase, debugRole, isDevMode])
+  }, [apiBase, debugRole, isDevMode, fetchWorkspaceId])
 
   useEffect(() => {
     if (!isDevMode) return
@@ -150,12 +197,47 @@ export default function App() {
     return () => window.clearTimeout(timeout)
   }, [searchQuery])
 
+  useEffect(() => {
+    let cancelled = false
+    const runSearch = async () => {
+      const query = debouncedSearch.trim()
+      if (query.length < 2) {
+        setSearchResults(null)
+        setSearchError(null)
+        return
+      }
+      setSearchLoading(true)
+      setSearchError(null)
+      try {
+        const wsId = workspaceId || (await fetchWorkspaceId())
+        if (!wsId) {
+          throw new Error(t('workspaceMissing'))
+        }
+        const res = await apiRequest<SearchResults>('/api/v1/search', {
+          params: { workspace_id: wsId, q: query },
+        })
+        if (!cancelled) setSearchResults(res)
+      } catch (err) {
+        if (!cancelled) {
+          setSearchResults(null)
+          setSearchError((err as Error).message || t('searchError'))
+        }
+      } finally {
+        if (!cancelled) setSearchLoading(false)
+      }
+    }
+    void runSearch()
+    return () => {
+      cancelled = true
+    }
+  }, [debouncedSearch, apiRequest, workspaceId, fetchWorkspaceId])
+
   const loadContacts = useCallback(async () => {
     if (!workspaceId) return
     setContactsLoading(true)
     setContactError(null)
     try {
-      const res = await apiRequest<{ data: Contact[] }>('/api/v1/contacts')
+      const res = await apiRequest<{ data: Contact[] }>('/api/v1/contacts', { params: { limit: 200 } })
       setContacts(res.data || [])
     } catch (e) {
       setContactError((e as Error).message)
@@ -167,7 +249,7 @@ export default function App() {
   const searchContacts = useCallback(
     async (query: string) => {
       if (!workspaceId) return []
-      const res = await apiRequest<{ data: Contact[] }>('/api/v1/contacts')
+      const res = await apiRequest<{ data: Contact[] }>('/api/v1/contacts', { params: { limit: 200 } })
       const q = query.trim().toLowerCase()
       if (!q) return res.data || []
       return (res.data || []).filter((item) => item.display_name.toLowerCase().includes(q))
@@ -406,102 +488,45 @@ export default function App() {
     }
   }
 
-  const parseCsv = (text: string): ImportContact[] => {
-    const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0)
-    if (lines.length === 0) return []
-    const headers = lines[0].split(',').map((h) => h.trim().toLowerCase())
-    const nameIdx = headers.findIndex((h) => ['display_name', 'name', 'full_name'].includes(h))
-    const emailIdx = headers.findIndex((h) => ['email', 'emails'].includes(h))
-    const phoneIdx = headers.findIndex((h) => ['phone', 'phones', t('csvHeaderPhoneRu'), 'phone_number'].includes(h))
-    return lines.slice(1).map((line) => {
-      const cells = line.split(',').map((c) => c.trim())
-      const name = nameIdx >= 0 ? cells[nameIdx] : cells[0]
-      const email = emailIdx >= 0 ? cells[emailIdx] : ''
-      const phone = phoneIdx >= 0 ? cells[phoneIdx] : ''
-      return {
-        display_name: name || t('contactsNoName'),
-        emails: email ? [email] : [],
-        phones: phone ? [phone] : [],
-      }
-    })
-  }
-
-  const parseVcard = (text: string): ImportContact[] => {
-    const cards = text.split(/END:VCARD/i)
-    return cards
-      .map((raw) => raw.trim())
-      .filter((raw) => raw.length > 0)
-      .map((raw) => {
-        const lines = raw
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .filter(Boolean)
-        const nameLine = lines.find((l) => l.toUpperCase().startsWith('FN:'))
-        const emailLine = lines.find((l) => l.toUpperCase().startsWith('EMAIL'))
-        const phoneLine = lines.find((l) => l.toUpperCase().startsWith('TEL'))
-        const name = nameLine ? nameLine.split(':').slice(1).join(':').trim() : t('contactsNoName')
-        const email = emailLine ? emailLine.split(':').slice(1).join(':').trim() : ''
-        const phone = phoneLine ? phoneLine.split(':').slice(1).join(':').trim() : ''
-        return {
-          display_name: name || t('contactsNoName'),
-          emails: email ? [email] : [],
-          phones: phone ? [phone] : [],
-        }
-      })
-  }
-
-  const parseJson = (text: string): ImportContact[] => {
-    const data = JSON.parse(text)
-    if (!Array.isArray(data)) return []
-    return data.map((item) => {
-      const name = item.display_name || item.name || item.full_name || t('contactsNoName')
-      const email = item.email || item.emails?.[0] || ''
-      const phone = item.phone || item.phones?.[0] || ''
-      return {
-        display_name: String(name),
-        emails: email ? [String(email)] : [],
-        phones: phone ? [String(phone)] : [],
-      }
-    })
-  }
-
-  const handleImportContacts = async (file: File) => {
-    if (!workspaceId) return
-    setImportStatus(t('importInProgress'))
-    setContactError(null)
-    try {
-      const text = await file.text()
-      const lowerName = file.name.toLowerCase()
-      let contactsToImport: ImportContact[] = []
-      if (lowerName.endsWith('.vcf') || lowerName.endsWith('.vcard')) {
-        contactsToImport = parseVcard(text)
-      } else if (lowerName.endsWith('.json')) {
-        contactsToImport = parseJson(text)
-      } else {
-        contactsToImport = parseCsv(text)
-      }
-
-      let successCount = 0
-      for (const contact of contactsToImport) {
-        await apiRequest<Contact>('/api/v1/contacts', {
-          method: 'POST',
-          body: {
-            display_name: contact.display_name,
-            tie_strength: 'medium',
-            visibility: 'shared',
-            emails: contact.emails,
-            phones: contact.phones,
-          },
-        })
-        successCount += 1
-      }
-      setImportStatus(`${t('importDonePrefix')} ${successCount} ${t('importDoneSuffix')}`)
-      await loadContacts()
-    } catch (e) {
-      setImportStatus(null)
-      setContactError(`${t('importErrorPrefix')} ${(e as Error).message}`)
+  const handleImportContacts = async (file: File): Promise<ImportReport> => {
+    if (!workspaceId) {
+      throw new Error(t('workspaceMissing'))
     }
+    const formData = new FormData()
+    formData.append('file', file)
+    const report = await apiRequest<ImportReport>('/api/v1/contacts/import', {
+      method: 'POST',
+      body: formData,
+    })
+    await loadContacts()
+    return report
   }
+
+  const loadDuplicates = useCallback(async () => {
+    const wsId = workspaceId || (await fetchWorkspaceId())
+    if (!wsId) {
+      throw new Error(t('workspaceMissing'))
+    }
+    const res = await apiRequest<{ groups: DuplicateGroup[] }>('/api/v1/contacts/duplicates', {
+      params: { workspace_id: wsId },
+    })
+    return res.groups || []
+  }, [apiRequest, workspaceId, fetchWorkspaceId])
+
+  const mergeContacts = useCallback(
+    async (primaryId: string, mergeIds: string[]) => {
+      const wsId = workspaceId || (await fetchWorkspaceId())
+      if (!wsId) {
+        throw new Error(t('workspaceMissing'))
+      }
+      await apiRequest('/api/v1/contacts/merge', {
+        method: 'POST',
+        params: { workspace_id: wsId },
+        body: { primary_contact_id: primaryId, merge_contact_ids: mergeIds },
+      })
+    },
+    [apiRequest, workspaceId, fetchWorkspaceId],
+  )
 
   const workspaceHint = workspaceId ? null : (
     <div style={{ marginTop: 12, padding: 12, background: '#fff7e6', borderRadius: 8 }}>
@@ -510,19 +535,24 @@ export default function App() {
   )
 
   return (
-    <Layout
-      searchQuery={searchQuery}
-      onSearchChange={setSearchQuery}
-      userEmail={me?.user.email}
-      roleLabel={debugRole === 'assistant' ? t('roleAssistant') : t('roleOwner')}
-      isDevMode={isDevMode}
-      devRole={debugRole}
-      onDevRoleChange={setDebugRole}
-    >
-      <p style={{ color: '#666', marginTop: 0 }}>{t('appTagline')}</p>
-      {workspaceHint}
+    <ToastProvider>
+      <Layout
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onSearchClear={() => setSearchQuery('')}
+        searchResults={searchResults}
+        searchLoading={searchLoading}
+        searchError={searchError}
+        userEmail={me?.user.email}
+        roleLabel={debugRole === 'assistant' ? t('roleAssistant') : t('roleOwner')}
+        isDevMode={isDevMode}
+        devRole={debugRole}
+        onDevRoleChange={setDebugRole}
+      >
+        <p style={{ color: '#666', marginTop: 0 }}>{t('appTagline')}</p>
+        {workspaceHint}
 
-      <Routes>
+        <Routes>
         <Route path="/" element={<Navigate to="/contacts" />} />
         <Route
           path="/contacts"
@@ -532,7 +562,6 @@ export default function App() {
               role={debugRole}
               contactsLoading={contactsLoading}
               contactError={contactError}
-              importStatus={importStatus}
               contactForm={contactForm}
               contactFormErrors={contactFormErrors}
               searchQuery={debouncedSearch}
@@ -559,6 +588,25 @@ export default function App() {
           }
         />
         <Route
+          path="/today"
+          element={
+            <TodayPage
+              contacts={contacts}
+              contactsLoading={contactsLoading}
+              contactError={contactError}
+              role={debugRole}
+              reminders={reminders}
+              remindersLoading={remindersLoading}
+              reminderError={reminderError}
+              loadInteractions={loadContactInteractions}
+              onRefreshContacts={loadContacts}
+              onRefreshReminders={loadReminders}
+              apiRequest={apiRequest}
+            />
+          }
+        />
+        <Route path="/duplicates" element={<DuplicatesPage loadDuplicates={loadDuplicates} mergeContacts={mergeContacts} />} />
+        <Route
           path="/contacts/:contactId"
           element={
             <ContactCardPage
@@ -572,6 +620,7 @@ export default function App() {
               createIntroduction={createIntroduction}
               searchContacts={searchContacts}
               loadRemindersForContact={loadRemindersForContact}
+              createAssistantMessage={createAssistantMessage}
             />
           }
         />
@@ -593,6 +642,7 @@ export default function App() {
           path="/reminders"
           element={
             <RemindersPage
+              role={debugRole}
               reminders={reminders}
               remindersLoading={remindersLoading}
               reminderError={reminderError}
@@ -600,6 +650,7 @@ export default function App() {
               onReminderFormChange={setReminderForm}
               onCreateReminder={handleCreateReminder}
               onRefreshReminders={loadReminders}
+              createAssistantMessage={createAssistantMessage}
             />
           }
         />
@@ -636,9 +687,12 @@ export default function App() {
         />
         <Route
           path="/introductions"
-          element={<IntroductionsPage contacts={contacts} apiRequest={apiRequest} />}
+          element={<IntroductionsPage contacts={contacts} apiRequest={apiRequest} role={debugRole} createAssistantMessage={createAssistantMessage} />}
         />
-        <Route path="/projects" element={<PlaceholderPage title={t('menuProjects')} description={t('placeholderDescription')} />} />
+        <Route
+          path="/projects"
+          element={<PlaceholderPage title={t('menuProjects')} description={t('placeholderDescription')} testId="projects-page" />}
+        />
         <Route path="/strategy" element={<StrategyPage />} />
         <Route path="/audit" element={<AuditPage role={debugRole} apiRequest={apiRequest} />} />
       </Routes>
@@ -656,7 +710,8 @@ export default function App() {
               : t('backendStatusDown')}
         </strong>
       </div>
-      {error && <div style={{ marginTop: 8, color: '#b00020' }}>{error}</div>}
-    </Layout>
+        {error && <div style={{ marginTop: 8, color: '#b00020' }}>{error}</div>}
+      </Layout>
+    </ToastProvider>
   )
 }

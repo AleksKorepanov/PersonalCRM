@@ -112,6 +112,172 @@ def _organization_from_joined(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+def get_or_create_organization(conn, ctx: WorkspaceContext, user: UserPrincipal, name: str) -> Optional[str]:
+    normalized = (name or "").strip()
+    if not normalized:
+        return None
+    row = fetchone(
+        conn,
+        "SELECT id FROM organizations WHERE workspace_id = %s AND lower(name) = lower(%s) AND deleted_at IS NULL",
+        (ctx.workspace_id, normalized),
+    )
+    if row:
+        return str(row["id"])
+
+    created = execute_returning_one(
+        conn,
+        """
+        INSERT INTO organizations(workspace_id, name, created_by, updated_by)
+        VALUES (%s, %s, %s, %s)
+        RETURNING id
+        """,
+        (ctx.workspace_id, normalized, user.user_id, user.user_id),
+    )
+    return str(created["id"])
+
+
+def get_contacts_by_ids(conn, ctx: WorkspaceContext, contact_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    if not contact_ids:
+        return {}
+
+    params: List[Any] = [ctx.workspace_id, contact_ids]
+    where = ["c.workspace_id = %s", "c.id = ANY(%s)", "c.deleted_at IS NULL"]
+    if ctx.membership_role != "owner":
+        where.append("c.visibility <> 'private'")
+
+    sql = """
+        SELECT
+          c.*,
+          o.id as org_id,
+          o.name as org_name,
+          o.website as org_website,
+          o.industry as org_industry,
+          o.created_at as org_created_at,
+          o.updated_at as org_updated_at
+        FROM contacts c
+        LEFT JOIN organizations o ON o.id = c.organization_id
+        WHERE
+    """
+    sql += " AND ".join(where)
+
+    rows = fetchall(conn, sql, tuple(params))
+    data = [_row_to_contact(conn, r, ctx) for r in rows]
+    return {item["id"]: item for item in data}
+
+
+def merge_contacts(conn, ctx: WorkspaceContext, user: UserPrincipal, primary_id: str, merge_ids: List[str]) -> Dict[str, Any]:
+    if not merge_ids:
+        raise HTTPException(status_code=422, detail={"code": "VALIDATION_ERROR", "message": "Список для объединения пуст"})
+
+    unique_merge_ids = []
+    seen = set()
+    for cid in merge_ids:
+        if cid and cid not in seen:
+            unique_merge_ids.append(cid)
+            seen.add(cid)
+
+    if primary_id in unique_merge_ids:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "VALIDATION_ERROR", "message": "Основной контакт не может быть в списке объединения"},
+        )
+
+    all_ids = [primary_id, *unique_merge_ids]
+    rows = fetchall(
+        conn,
+        "SELECT id FROM contacts WHERE workspace_id = %s AND id = ANY(%s) AND deleted_at IS NULL",
+        (ctx.workspace_id, all_ids),
+    )
+    found = {str(r["id"]) for r in rows}
+    missing = [cid for cid in all_ids if cid not in found]
+    if missing:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Контакт не найден"})
+
+    merged_tags: List[str] = []
+    merged_tags.extend(_get_tag_names(conn, primary_id))
+    for cid in unique_merge_ids:
+        merged_tags.extend(_get_tag_names(conn, cid))
+    merged_tags = sorted(set(merged_tags))
+    _set_contact_tags(conn, ctx.workspace_id, primary_id, merged_tags)
+
+    execute(
+        conn,
+        """
+        UPDATE interactions
+        SET contact_id = %s, updated_at = now(), updated_by = %s
+        WHERE workspace_id = %s AND contact_id = ANY(%s) AND deleted_at IS NULL
+        """,
+        (primary_id, user.user_id, ctx.workspace_id, unique_merge_ids),
+    )
+
+    execute(
+        conn,
+        """
+        UPDATE reminders
+        SET contact_id = %s, updated_at = now(), updated_by = %s
+        WHERE workspace_id = %s AND contact_id = ANY(%s) AND deleted_at IS NULL
+        """,
+        (primary_id, user.user_id, ctx.workspace_id, unique_merge_ids),
+    )
+
+    execute(
+        conn,
+        """
+        UPDATE introductions
+        SET requester_contact_id = %s, updated_at = now(), updated_by = %s
+        WHERE workspace_id = %s AND requester_contact_id = ANY(%s) AND deleted_at IS NULL
+        """,
+        (primary_id, user.user_id, ctx.workspace_id, unique_merge_ids),
+    )
+    execute(
+        conn,
+        """
+        UPDATE introductions
+        SET introducer_contact_id = %s, updated_at = now(), updated_by = %s
+        WHERE workspace_id = %s AND introducer_contact_id = ANY(%s) AND deleted_at IS NULL
+        """,
+        (primary_id, user.user_id, ctx.workspace_id, unique_merge_ids),
+    )
+    execute(
+        conn,
+        """
+        UPDATE introductions
+        SET target_contact_id = %s, updated_at = now(), updated_by = %s
+        WHERE workspace_id = %s AND target_contact_id = ANY(%s) AND deleted_at IS NULL
+        """,
+        (primary_id, user.user_id, ctx.workspace_id, unique_merge_ids),
+    )
+
+    for cid in unique_merge_ids:
+        execute(
+            conn,
+            """
+            DELETE FROM project_participants pp
+            USING project_participants p2
+            WHERE pp.project_id = p2.project_id
+              AND pp.contact_id = %s
+              AND p2.contact_id = %s
+            """,
+            (cid, primary_id),
+        )
+        execute(conn, "UPDATE project_participants SET contact_id = %s WHERE contact_id = %s", (primary_id, cid))
+
+    execute(
+        conn,
+        """
+        UPDATE contacts
+        SET deleted_at = now(), updated_at = now(), updated_by = %s
+        WHERE workspace_id = %s AND id = ANY(%s)
+        """,
+        (user.user_id, ctx.workspace_id, unique_merge_ids),
+    )
+
+    after = {"primary_contact_id": primary_id, "merged_contact_ids": unique_merge_ids}
+    log_audit(conn, ctx, user, "contact.merge", "contact", primary_id, before=None, after=after)
+    conn.commit()
+    return after
+
+
 def _row_to_contact(conn, row: Dict[str, Any], ctx: WorkspaceContext) -> Dict[str, Any]:
     visibility = row.get("visibility") or "shared"
     # Visibility enforcement

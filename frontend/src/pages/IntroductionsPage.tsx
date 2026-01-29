@@ -1,13 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import AssistantMessageModal from '../components/AssistantMessageModal'
 import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
 import Select from '../components/ui/Select'
 import { t } from '../i18n/t'
-import type { ApiRequestOptions, Contact, Introduction } from '../types'
+import { useToast } from '../components/ui/Toast'
+import type { ApiRequestOptions, AssistantMessageCreate, Contact, Introduction } from '../types'
 
 type IntroductionsPageProps = {
   contacts: Contact[]
   apiRequest: <T,>(path: string, options?: ApiRequestOptions) => Promise<T>
+  role: 'owner' | 'assistant'
+  createAssistantMessage: (payload: AssistantMessageCreate) => Promise<void>
 }
 
 type FilterKey = 'all' | 'draft' | 'approval' | 'sent' | 'met' | 'completed'
@@ -53,7 +57,7 @@ const statusHint = (nextStatus: string) => {
   return ''
 }
 
-export default function IntroductionsPage({ contacts, apiRequest }: IntroductionsPageProps) {
+export default function IntroductionsPage({ contacts, apiRequest, role, createAssistantMessage }: IntroductionsPageProps) {
   const [items, setItems] = useState<Introduction[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -61,10 +65,10 @@ export default function IntroductionsPage({ contacts, apiRequest }: Introduction
   const [selected, setSelected] = useState<Introduction | null>(null)
   const [consents, setConsents] = useState({ requester: false, target: false })
   const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
-  const [copySuccess, setCopySuccess] = useState<string | null>(null)
-  const [copyError, setCopyError] = useState<string | null>(null)
+  const toast = useToast()
+  const [assistantModalOpen, setAssistantModalOpen] = useState(false)
+  const [assistantSubmitting, setAssistantSubmitting] = useState(false)
+  const [selectedIntroForMessage, setSelectedIntroForMessage] = useState<Introduction | null>(null)
 
   const contactById = useMemo(
     () => Object.fromEntries(contacts.map((contact) => [contact.id, contact])),
@@ -108,16 +112,10 @@ export default function IntroductionsPage({ contacts, apiRequest }: Introduction
       requester: Boolean(intro.consent_requester),
       target: Boolean(intro.consent_target),
     })
-    setSaveError(null)
-    setSaveSuccess(null)
-    setCopySuccess(null)
-    setCopyError(null)
   }
 
   const updateIntroduction = async (introId: string, payload: Record<string, unknown>) => {
     setSaving(true)
-    setSaveError(null)
-    setSaveSuccess(null)
     try {
       const updated = await apiRequest<Introduction>(`/api/v1/introductions/${introId}`, {
         method: 'PATCH',
@@ -125,10 +123,9 @@ export default function IntroductionsPage({ contacts, apiRequest }: Introduction
       })
       setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       setSelected(updated)
-      setSaveSuccess(t('introSaveSuccess'))
+      toast.success(t('toastSaved'))
     } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err)
-      setSaveError(detail || t('introSaveFailed'))
+      toast.error(t('toastActionFailed'))
     } finally {
       setSaving(false)
     }
@@ -169,6 +166,29 @@ export default function IntroductionsPage({ contacts, apiRequest }: Introduction
     return lines.join('\n')
   }
 
+  const handleAssistantMessageSubmit = async (payload: { task: string; reason?: string; due_at?: string }) => {
+    if (!selectedIntroForMessage || assistantSubmitting) return
+    setAssistantSubmitting(true)
+    try {
+      await createAssistantMessage({
+        target_type: 'introduction',
+        target_id: selectedIntroForMessage.id,
+        task: payload.task,
+        reason: payload.reason,
+        due_at: payload.due_at,
+      })
+      toast.success(t('assistantMessageSent'))
+      setAssistantModalOpen(false)
+      setSelectedIntroForMessage(null)
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      const message = import.meta.env.DEV && detail ? `${t('assistantMessageFailed')}: ${detail}` : t('assistantMessageFailed')
+      toast.error(message)
+    } finally {
+      setAssistantSubmitting(false)
+    }
+  }
+
   return (
     <section style={{ marginTop: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
@@ -195,14 +215,15 @@ export default function IntroductionsPage({ contacts, apiRequest }: Introduction
         <div style={{ padding: 12, border: '1px dashed #ddd', borderRadius: 8 }}>{t('introEmpty')}</div>
       )}
       {filtered.length > 0 && (
-        <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ display: 'grid', gap: 10 }} data-testid="introductions-list">
           {filtered.map((intro) => (
             <div
               key={intro.id}
+              data-testid={`introduction-row-${intro.id}`}
               style={{ padding: 12, borderRadius: 10, border: '1px solid #e5e7eb', display: 'grid', gap: 6 }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                <div style={{ fontWeight: 600 }}>
+                <div style={{ fontWeight: 600 }} data-testid="intro-status">
                   {t('introStatusLabel')}: {statusLabel(intro.status)}
                 </div>
                 <div style={{ fontSize: 12, color: '#666' }}>{new Date(intro.created_at).toLocaleDateString()}</div>
@@ -212,9 +233,20 @@ export default function IntroductionsPage({ contacts, apiRequest }: Introduction
                 {renderParticipant(intro.introducer_contact_id)}, {renderParticipant(intro.target_contact_id)}
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <Button variant="secondary" onClick={() => openDetails(intro)}>
+                <Button variant="secondary" onClick={() => openDetails(intro)} dataTestId={`intro-open-${intro.id}`}>
                   {t('introOpen')}
                 </Button>
+                {role === 'assistant' && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setSelectedIntroForMessage(intro)
+                      setAssistantModalOpen(true)
+                    }}
+                  >
+                    {t('assistantMessageButton')}
+                  </Button>
+                )}
               </div>
             </div>
           ))}
@@ -369,26 +401,37 @@ export default function IntroductionsPage({ contacts, apiRequest }: Introduction
                       const text = buildIntroText(selected)
                       try {
                         await navigator.clipboard.writeText(text)
-                        setCopySuccess(t('introCopySuccess'))
-                        setCopyError(null)
+                        toast.success(t('toastCopied'))
                       } catch {
-                        setCopyError(t('introCopyFailed'))
-                        setCopySuccess(null)
+                        toast.error(t('toastActionFailed'))
                       }
                     }}
+                    dataTestId="intro-copy-text"
                   >
                     {t('introCopyButton')}
                   </Button>
                 </div>
               </div>
-              {saveError && <Alert type="error">{saveError}</Alert>}
-              {saveSuccess && <Alert type="success">{saveSuccess}</Alert>}
-              {copyError && <Alert type="error">{copyError}</Alert>}
-              {copySuccess && <Alert type="success">{copySuccess}</Alert>}
             </div>
           </div>
         </div>
       )}
+      <AssistantMessageModal
+        open={assistantModalOpen}
+        targetLabel={
+          selectedIntroForMessage
+            ? `${t('assistantMessageTargetIntroduction')}: ${renderParticipant(selectedIntroForMessage.requester_contact_id)} → ${renderParticipant(
+                selectedIntroForMessage.target_contact_id,
+              )}`
+            : null
+        }
+        submitting={assistantSubmitting}
+        onClose={() => {
+          setAssistantModalOpen(false)
+          setSelectedIntroForMessage(null)
+        }}
+        onSubmit={handleAssistantMessageSubmit}
+      />
     </section>
   )
 }

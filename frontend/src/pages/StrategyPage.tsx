@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react'
-import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
 import TextField from '../components/ui/TextField'
 import { t } from '../i18n/t'
 import { DEFAULT_CADENCE, loadCadenceConfig, saveCadenceConfig } from '../utils/cadence'
+import { useToast } from '../components/ui/Toast'
 
 export default function StrategyPage() {
   const initial = useMemo(() => loadCadenceConfig(), [])
@@ -12,7 +12,7 @@ export default function StrategyPage() {
     B: String(initial.B),
     C: String(initial.C),
   })
-  const [success, setSuccess] = useState<string | null>(null)
+  const toast = useToast()
 
   const normalizeValue = (value: string, fallback: number) => {
     const parsed = Number.parseInt(value, 10)
@@ -28,7 +28,7 @@ export default function StrategyPage() {
     }
     saveCadenceConfig(config)
     setCadence({ A: String(config.A), B: String(config.B), C: String(config.C) })
-    setSuccess(t('cadenceSaved'))
+    toast.success(t('toastSaved'))
   }
 
   const handleReset = () => {
@@ -38,35 +38,39 @@ export default function StrategyPage() {
       B: String(DEFAULT_CADENCE.B),
       C: String(DEFAULT_CADENCE.C),
     })
-    setSuccess(t('cadenceReset'))
+    toast.success(t('toastSaved'))
   }
 
   return (
     <section style={{ marginTop: 16 }}>
       <h2>{t('cadenceSettingsTitle')}</h2>
       <div style={{ color: '#666', marginBottom: 12 }}>{t('cadenceSettingsDescription')}</div>
-      {success && <Alert type="success">{success}</Alert>}
       <div style={{ display: 'grid', gap: 12, maxWidth: 420 }}>
         <TextField
           label={t('cadenceTierALabel')}
           value={cadence.A}
           onChange={(value) => setCadence((prev) => ({ ...prev, A: value }))}
           type="number"
+          dataTestId="cadence-a"
         />
         <TextField
           label={t('cadenceTierBLabel')}
           value={cadence.B}
           onChange={(value) => setCadence((prev) => ({ ...prev, B: value }))}
           type="number"
+          dataTestId="cadence-b"
         />
         <TextField
           label={t('cadenceTierCLabel')}
           value={cadence.C}
           onChange={(value) => setCadence((prev) => ({ ...prev, C: value }))}
           type="number"
+          dataTestId="cadence-c"
         />
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button onClick={handleSave}>{t('cadenceSave')}</Button>
+          <Button onClick={handleSave} dataTestId="cadence-save">
+            {t('cadenceSave')}
+          </Button>
           <Button variant="secondary" onClick={handleReset}>
             {t('cadenceResetButton')}
           </Button>

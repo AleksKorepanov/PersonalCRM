@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from app.api.v1 import me, workspaces, organizations, contacts, interactions, introductions, reminders, strategy, projects, rbac, audit
+from app.api.v1 import me, workspaces, organizations, contacts, interactions, introductions, reminders, strategy, projects, rbac, audit, search, assistant_messages
 from app.core.deps import set_request_context
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(set_request_context)])
@@ -16,3 +16,5 @@ router.include_router(reminders.router, tags=["reminders"])
 router.include_router(strategy.router, tags=["strategy"])
 router.include_router(projects.router, tags=["projects"])
 router.include_router(audit.router, tags=["audit"])
+router.include_router(search.router, tags=["search"])
+router.include_router(assistant_messages.router, tags=["assistant"])

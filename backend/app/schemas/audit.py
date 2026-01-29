@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AuditEvent(BaseModel):
@@ -15,3 +15,15 @@ class AuditEvent(BaseModel):
     before: Optional[Dict[str, Any]] = None
     after: Optional[Dict[str, Any]] = None
     created_at: str
+
+
+class AssistantMessageCreate(BaseModel):
+    target_type: Literal["contact", "reminder", "introduction"]
+    target_id: str
+    task: str = Field(..., min_length=2)
+    reason: Optional[str] = None
+    due_at: Optional[str] = None
+
+
+class AssistantMessageResponse(BaseModel):
+    status: str
