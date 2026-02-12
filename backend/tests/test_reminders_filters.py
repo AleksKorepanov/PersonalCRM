@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import uuid
 
 from fastapi.testclient import TestClient
 
@@ -7,11 +8,11 @@ from app.main import create_app
 
 def test_reminders_due_before_filter(monkeypatch):
     monkeypatch.setenv("AUTH_DISABLED", "1")
-    monkeypatch.setenv("DEV_USER_ID", "00000000-0000-0000-0000-000000000777")
-    monkeypatch.setenv("DEV_WORKSPACE_ID", "00000000-0000-0000-0000-000000000888")
-    monkeypatch.setenv("DEV_USER_EMAIL", "reminders_test@local.dev")
-
-    workspace_id = "00000000-0000-0000-0000-000000000888"
+    user_id = str(uuid.uuid4())
+    workspace_id = str(uuid.uuid4())
+    monkeypatch.setenv("DEV_USER_ID", user_id)
+    monkeypatch.setenv("DEV_WORKSPACE_ID", workspace_id)
+    monkeypatch.setenv("DEV_USER_EMAIL", f"reminders_test_{uuid.uuid4().hex}@local.dev")
 
     with TestClient(create_app()) as client:
         due_at = datetime.now(tz=timezone.utc).isoformat()

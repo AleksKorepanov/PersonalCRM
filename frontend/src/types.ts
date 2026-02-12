@@ -52,6 +52,8 @@ export type Interaction = {
   occurred_at: string
   summary?: string | null
   outcome?: string | null
+  next_action?: string | null
+  next_action_at?: string | null
   created_at: string
 }
 

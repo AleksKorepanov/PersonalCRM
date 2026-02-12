@@ -43,6 +43,18 @@ async def get_db(request: Request) -> Generator:
 def _set_request_gucs(request: Request, conn) -> None:
     user_id = getattr(request.state, "user_id", "") or ""
     workspace_id = getattr(request.state, "workspace_id", "") or ""
+    workspace_param = request.query_params.get("workspace_id")
+    if workspace_param:
+        workspace_id = workspace_param
+        request.state.workspace_id = workspace_param
+    if settings.auth_disabled and (not user_id or not workspace_id):
+        role = _get_dev_role(request)
+        principal, workspace_id = _ensure_dev_identity(request, role)
+        request.state.user_principal = principal
+        request.state.user_id = principal.user_id
+        request.state.workspace_id = workspace_id
+        request.state.membership_role = role
+        user_id = principal.user_id
     conn.execute("SELECT set_config('app.user_id', %s, true)", (str(user_id),))
     conn.execute("SELECT set_config('app.workspace_id', %s, true)", (str(workspace_id),))
 

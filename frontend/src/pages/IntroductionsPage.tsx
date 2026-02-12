@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import AssistantMessageModal from '../components/AssistantMessageModal'
 import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
+import SectionHeader from '../components/ui/SectionHeader'
 import Select from '../components/ui/Select'
 import { t } from '../i18n/t'
 import { useToast } from '../components/ui/Toast'
@@ -190,25 +191,27 @@ export default function IntroductionsPage({ contacts, apiRequest, role, createAs
   }
 
   return (
-    <section style={{ marginTop: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <h2>{t('menuIntroductions')}</h2>
-        <div style={{ width: 260 }}>
-          <Select
-            label={t('introFilterLabel')}
-            value={filter}
-            onChange={(value) => setFilter(value as FilterKey)}
-            options={[
-              { value: 'all', label: t('introFilterAll') },
-              { value: 'draft', label: t('introFilterDraft') },
-              { value: 'approval', label: t('introFilterApproval') },
-              { value: 'sent', label: t('introFilterSent') },
-              { value: 'met', label: t('introFilterMet') },
-              { value: 'completed', label: t('introFilterCompleted') },
-            ]}
-          />
-        </div>
-      </div>
+    <section style={{ marginTop: 'var(--space-3)' }}>
+      <SectionHeader
+        title={t('menuIntroductions')}
+        actions={
+          <div style={{ width: 260 }}>
+            <Select
+              label={t('introFilterLabel')}
+              value={filter}
+              onChange={(value) => setFilter(value as FilterKey)}
+              options={[
+                { value: 'all', label: t('introFilterAll') },
+                { value: 'draft', label: t('introFilterDraft') },
+                { value: 'approval', label: t('introFilterApproval') },
+                { value: 'sent', label: t('introFilterSent') },
+                { value: 'met', label: t('introFilterMet') },
+                { value: 'completed', label: t('introFilterCompleted') },
+              ]}
+            />
+          </div>
+        }
+      />
       {loading && <Alert type="info">{t('introLoading')}</Alert>}
       {error && <Alert type="error">{error}</Alert>}
       {!loading && filtered.length === 0 && (

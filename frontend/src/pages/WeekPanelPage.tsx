@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
+import SectionHeader from '../components/ui/SectionHeader'
 import TextField from '../components/ui/TextField'
 import { useToast } from '../components/ui/Toast'
 import { t } from '../i18n/t'
@@ -294,8 +295,8 @@ export default function WeekPanelPage({
   }
 
   return (
-    <section style={{ marginTop: 16, display: 'grid', gap: 20 }} data-testid="weekly-dashboard">
-      <h2>{t('weekPanelTitle')}</h2>
+    <section style={{ marginTop: 'var(--space-3)', display: 'grid', gap: 'var(--space-5)' }} data-testid="weekly-dashboard">
+      <SectionHeader title={t('weekPanelTitle')} />
 
       <div style={{ display: 'grid', gap: 12 }} data-testid="overdue-list">
         <div style={{ fontWeight: 600 }}>{t('weekBlockOverdue')}</div>

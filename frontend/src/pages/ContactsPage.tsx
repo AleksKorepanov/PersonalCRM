@@ -2,8 +2,14 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Contact, ImportReport } from '../types'
 import Alert from '../components/ui/Alert'
+import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
+import Card from '../components/ui/Card'
+import Divider from '../components/ui/Divider'
+import EmptyState from '../components/ui/EmptyState'
+import SectionHeader from '../components/ui/SectionHeader'
 import Select from '../components/ui/Select'
+import Skeleton from '../components/ui/Skeleton'
 import TextField from '../components/ui/TextField'
 import { t } from '../i18n/t'
 import { parseTierFromTags } from '../utils/cadence'
@@ -229,35 +235,44 @@ export default function ContactsPage({
   const importErrorsList = importReport?.errors ?? []
 
   return (
-    <section style={{ marginTop: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <h2>{t('pageContactsTitle')}</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ fontSize: 14, color: '#666' }}>
-            {t('contactsCountLabel')}: {visibleContacts.length}
-          </div>
-          <Button variant="secondary" onClick={handleExportContactsCsv}>
-            {t('contactsExportCsv')}
-          </Button>
-          <Button variant="secondary" onClick={handleExportContactsJson}>
-            {t('contactsExportJson')}
-          </Button>
-          <Button variant="secondary" onClick={() => setImportModalOpen(true)} dataTestId="contacts-import-open">
-            {t('contactsImportButton')}
-          </Button>
-          <Button onClick={onOpenModal} dataTestId="contact-create">
-            {t('pageContactsCreate')}
-          </Button>
-        </div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <div>
-          <h3>{t('contactsListTitle')}</h3>
-          {contactsLoading && <Alert type="info">{t('contactsLoading')}</Alert>}
+    <section style={{ marginTop: 'var(--space-3)' }}>
+      <SectionHeader
+        title={t('pageContactsTitle')}
+        actions={
+          <>
+            <div style={{ fontSize: 'var(--font-sm)', color: 'var(--color-muted)', alignSelf: 'center' }}>
+              {t('contactsCountLabel')}: {visibleContacts.length}
+            </div>
+            <Button variant="secondary" onClick={handleExportContactsCsv}>
+              {t('contactsExportCsv')}
+            </Button>
+            <Button variant="secondary" onClick={handleExportContactsJson}>
+              {t('contactsExportJson')}
+            </Button>
+            <Button variant="secondary" onClick={() => setImportModalOpen(true)} dataTestId="contacts-import-open">
+              {t('contactsImportButton')}
+            </Button>
+            <Button onClick={onOpenModal} dataTestId="contact-create">
+              {t('pageContactsCreate')}
+            </Button>
+          </>
+        }
+      />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-5)' }}>
+        <Card>
+          <SectionHeader title={t('contactsListTitle')} />
+          {contactsLoading && (
+            <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+              <Skeleton height={14} />
+              <Skeleton height={14} />
+              <Skeleton height={14} />
+              <Skeleton height={14} />
+            </div>
+          )}
           {contactError && visibleContacts.length === 0 && (
             <Alert type="error">
               {t('contactsLoadFailed')}
-              <div style={{ marginTop: 8 }}>
+              <div style={{ marginTop: 'var(--space-2)' }}>
                 <Button variant="secondary" onClick={onRefreshContacts}>
                   {t('contactsRetry')}
                 </Button>
@@ -265,40 +280,59 @@ export default function ContactsPage({
             </Alert>
           )}
           {!contactsLoading && visibleContacts.length === 0 && !contactError && (
-            <div style={{ padding: 12, border: '1px dashed #ddd', borderRadius: 8 }}>
-              <div style={{ marginBottom: 8 }}>{t('contactsEmpty')}</div>
-              <Button onClick={onOpenModal}>{t('contactsEmptyCta')}</Button>
-            </div>
+            <EmptyState title={t('contactsEmpty')} actionLabel={t('contactsEmptyCta')} onAction={onOpenModal} />
           )}
           {!contactsLoading && visibleContacts.length > 0 && filteredContacts.length === 0 && (
-            <div style={{ padding: 12, border: '1px dashed #ddd', borderRadius: 8 }}>
-              <div style={{ marginBottom: 6 }}>{t('contactsNotFound')}</div>
-              <div style={{ color: '#666' }}>{t('contactsNotFoundHint')}</div>
+            <EmptyState title={t('contactsNotFound')} description={t('contactsNotFoundHint')} />
+          )}
+          {filteredContacts.length > 0 && (
+            <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden' }} data-testid="contacts-table">
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                <thead style={{ background: '#f9fafb', textAlign: 'left' }}>
+                  <tr>
+                    <th style={{ padding: '10px 12px' }}>{t('contactsNameLabel')}</th>
+                    <th style={{ padding: '10px 12px' }}>{t('contactsVisibilityLabel')}</th>
+                    <th style={{ padding: '10px 12px' }}>{t('contactTierLabel')}</th>
+                    <th style={{ padding: '10px 12px' }}>{t('contactsUpdatedLabel')}</th>
+                    <th style={{ padding: '10px 12px' }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredContacts.map((contact) => (
+                    <tr key={contact.id} style={{ borderTop: '1px solid #eef0f2' }} data-testid={`contact-row-${contact.id}`}>
+                      <td style={{ padding: '10px 12px' }}>{contact.display_name}</td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <Badge label={visibilityLabel(contact.visibility)} />
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <Badge label={tierLabel(contact)} variant="accent" />
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>{new Date(contact.updated_at).toLocaleString()}</td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <Button
+                          variant="secondary"
+                          dataTestId={`contact-open-${contact.id}`}
+                          onClick={() => handleOpen(contact)}
+                        >
+                          {t('contactsOpen')}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
-          <ul data-testid="contacts-list">
-            {filteredContacts.map((contact) => (
-              <li key={contact.id} style={{ marginBottom: 8 }} data-testid={`contact-row-${contact.id}`}>
-                <button
-                  data-testid={`contact-open-${contact.id}`}
-                  onClick={() => handleOpen(contact)}
-                  style={{ marginRight: 8 }}
-                >
-                  {t('contactsOpen')}
-                </button>
-                {contact.display_name} ({visibilityLabel(contact.visibility)}) • {t('contactTierLabel')}: {tierLabel(contact)}
-              </li>
-            ))}
-          </ul>
+          <Divider />
           <Button variant="secondary" onClick={onRefreshContacts} dataTestId="contacts-refresh">
             {t('contactsRefresh')}
           </Button>
-        </div>
-        <div>
-          <h3>{t('contactsDetailsTitle')}</h3>
-          {!selectedContact && <div>{t('contactsDetailsEmpty')}</div>}
+        </Card>
+        <Card>
+          <SectionHeader title={t('contactsDetailsTitle')} />
+          {!selectedContact && <EmptyState title={t('contactsDetailsEmpty')} />}
           {selectedContact && (
-            <div style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
+            <div style={{ display: 'grid', gap: 'var(--space-2)', fontSize: 'var(--font-md)' }}>
               <div>
                 {t('contactsNameLabel')}: {selectedContact.display_name}
               </div>
@@ -313,7 +347,7 @@ export default function ContactsPage({
               </div>
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
       {isModalOpen && (

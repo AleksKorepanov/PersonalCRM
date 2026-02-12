@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import html2canvas from 'html2canvas'
+import { jsPDF } from 'jspdf'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import AssistantMessageModal from '../components/AssistantMessageModal'
 import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
@@ -7,13 +9,14 @@ import Select from '../components/ui/Select'
 import TextField from '../components/ui/TextField'
 import { useToast } from '../components/ui/Toast'
 import { t } from '../i18n/t'
-import type { AssistantMessageCreate, Contact, Interaction, Reminder } from '../types'
+import type { AssistantMessageCreate, Contact, Interaction, Introduction, Reminder } from '../types'
 import { applyTierToTags, loadCadenceConfig, parseTierFromTags, type CadenceTier } from '../utils/cadence'
 
 type ContactCardPageProps = {
   role: 'owner' | 'assistant'
   loadContact: (contactId: string) => Promise<Contact | null>
   updateContact: (contactId: string, payload: Record<string, unknown>) => Promise<Contact | null>
+  resolveOrganizationId: (name: string) => Promise<string | null>
   loadInteractions: (contactId: string) => Promise<Interaction[]>
   createInteraction: (
     contactId: string,
@@ -44,6 +47,7 @@ type ContactCardPageProps = {
   }) => Promise<void>
   searchContacts: (query: string) => Promise<Contact[]>
   loadRemindersForContact: (contactId: string) => Promise<Reminder[]>
+  loadIntroductionsForContact: (contactId: string) => Promise<Introduction[]>
   createAssistantMessage: (payload: AssistantMessageCreate) => Promise<void>
 }
 
@@ -58,6 +62,7 @@ export default function ContactCardPage({
   role,
   loadContact,
   updateContact,
+  resolveOrganizationId,
   loadInteractions,
   createInteraction,
   createReminder,
@@ -65,8 +70,10 @@ export default function ContactCardPage({
   createIntroduction,
   searchContacts,
   loadRemindersForContact,
+  loadIntroductionsForContact,
   createAssistantMessage,
 }: ContactCardPageProps) {
+  const navigate = useNavigate()
   const { contactId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const [contact, setContact] = useState<Contact | null>(null)
@@ -79,6 +86,7 @@ export default function ContactCardPage({
     phones: '',
     messengers: '',
     jobTitle: '',
+    company: '',
     industries: '',
     competencies: '',
     metContext: '',
@@ -94,6 +102,8 @@ export default function ContactCardPage({
   const [timelineError, setTimelineError] = useState<string | null>(null)
   const [lastInteraction, setLastInteraction] = useState<Interaction | null>(null)
   const [nextReminder, setNextReminder] = useState<Reminder | null>(null)
+  const [contactReminders, setContactReminders] = useState<Reminder[]>([])
+  const [contactIntroductions, setContactIntroductions] = useState<Introduction[]>([])
   const formatTimelineError = (err: unknown) => {
     const detail = err instanceof Error ? err.message : String(err)
     return import.meta.env.DEV ? `${t('timelineLoadFailed')} ${t('timelineLoadFailedDetails')} ${detail}` : t('timelineLoadFailed')
@@ -146,6 +156,9 @@ export default function ContactCardPage({
     summary: '',
     nextAction: '',
   })
+  const [followUpPromptOpen, setFollowUpPromptOpen] = useState(false)
+  const [followUpBaseDate, setFollowUpBaseDate] = useState<Date | null>(null)
+  const [followUpSubmitting, setFollowUpSubmitting] = useState(false)
   const [reminderModalOpen, setReminderModalOpen] = useState(false)
   const [reminderSubmitting, setReminderSubmitting] = useState(false)
   const [reminderForm, setReminderForm] = useState({
@@ -169,6 +182,8 @@ export default function ContactCardPage({
   const actionHandledRef = useRef(false)
   const [assistantModalOpen, setAssistantModalOpen] = useState(false)
   const [assistantSubmitting, setAssistantSubmitting] = useState(false)
+  const [exportingPdf, setExportingPdf] = useState(false)
+  const exportRef = useRef<HTMLDivElement | null>(null)
 
   const tabs = useMemo(
     () => [
@@ -236,22 +251,26 @@ export default function ContactCardPage({
 
   useEffect(() => {
     if (!contactId) return
-    Promise.all([loadInteractions(contactId), loadRemindersForContact(contactId)])
-      .then(([items, reminders]) => {
+    Promise.all([loadInteractions(contactId), loadRemindersForContact(contactId), loadIntroductionsForContact(contactId)])
+      .then(([items, reminders, introductions]) => {
         const sortedInteractions = [...items].sort(
           (a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime(),
         )
         setLastInteraction(sortedInteractions[0] || null)
-        const sortedReminders = [...reminders]
+        setContactReminders(reminders || [])
+        const sortedReminders = [...(reminders || [])]
           .filter((item) => item.due_at)
           .sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime())
         setNextReminder(sortedReminders[0] || null)
+        setContactIntroductions(introductions || [])
       })
       .catch(() => {
         setLastInteraction(null)
         setNextReminder(null)
+        setContactReminders([])
+        setContactIntroductions([])
       })
-  }, [contactId, loadInteractions, loadRemindersForContact])
+  }, [contactId, loadInteractions, loadRemindersForContact, loadIntroductionsForContact])
 
   useEffect(() => {
     if (!contactId || activeTab !== 'timeline') return
@@ -349,6 +368,7 @@ export default function ContactCardPage({
     }
     setInteractionErrors(errors)
     if (Object.keys(errors).length > 0) return
+    if (!normalizedType) return
 
     setInteractionSubmitting(true)
     try {
@@ -365,12 +385,40 @@ export default function ContactCardPage({
       toast.success(t('toastSaved'))
       const items = await loadInteractions(contactId)
       setTimeline(items)
+      setFollowUpBaseDate(occurredAtDate)
+      setFollowUpPromptOpen(true)
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
       const message = import.meta.env.DEV && detail ? `${t('toastActionFailed')}: ${detail}` : t('toastActionFailed')
       toast.error(message)
     } finally {
       setInteractionSubmitting(false)
+    }
+  }
+
+  const createFollowUpReminder = async (days: number) => {
+    if (!contactId || !contact || followUpSubmitting) return
+    const base = followUpBaseDate || new Date()
+    const dueAt = new Date(base.getTime() + days * 24 * 60 * 60 * 1000)
+    setFollowUpSubmitting(true)
+    try {
+      await createReminder(contactId, {
+        title: `${t('followUpTitlePrefix')} ${contact.display_name}`,
+        due_at: dueAt.toISOString(),
+      })
+      toast.success(t('toastSaved'))
+      onReminderCreated()
+      const reminders = await loadRemindersForContact(contactId)
+      setContactReminders(reminders || [])
+      const sortedReminders = [...(reminders || [])]
+        .filter((item) => item.due_at)
+        .sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime())
+      setNextReminder(sortedReminders[0] || null)
+      setFollowUpPromptOpen(false)
+    } catch {
+      toast.error(t('toastActionFailed'))
+    } finally {
+      setFollowUpSubmitting(false)
     }
   }
 
@@ -498,6 +546,7 @@ export default function ContactCardPage({
       .map(([key, value]) => `${key}:${value}`)
       .join(', '),
     jobTitle: data.job_title || '',
+    company: data.organization?.name || data.company || data.company_name || '',
     industries: (data.industries || []).join(', '),
     competencies: (data.competencies || []).join(', '),
     metContext: data.met_context || '',
@@ -540,9 +589,54 @@ export default function ContactCardPage({
     })
   }, [timeline, timelinePeriod, timelineTypes])
 
-  const nextActionText = nextReminder
-    ? `${t('contactHeaderActionContactBy')} ${new Date(nextReminder.due_at).toLocaleString()}`
-    : t('contactHeaderActionAddInteraction')
+  const overdueReminder = useMemo(() => {
+    const now = Date.now()
+    return contactReminders.find((item) => item.status === 'open' && new Date(item.due_at).getTime() < now) || null
+  }, [contactReminders])
+
+  const introRequiresStep = useMemo(() => {
+    const requiredStatuses = new Set(['requested', 'approved_a', 'approved_b', 'sent', 'met'])
+    return contactIntroductions.find((item) => requiredStatuses.has(item.status)) || null
+  }, [contactIntroductions])
+
+  const shouldTouch = useMemo(() => {
+    if (!cadenceDays) return false
+    if (!lastInteraction?.occurred_at) return true
+    const last = new Date(lastInteraction.occurred_at).getTime()
+    const nextDue = last + cadenceDays * 24 * 60 * 60 * 1000
+    return Date.now() > nextDue
+  }, [cadenceDays, lastInteraction])
+
+  const nextAction = useMemo(() => {
+    if (overdueReminder) {
+      return {
+        text: t('contactNextActionOverdueReminder'),
+        button: t('contactNextActionOverdueReminderButton'),
+        action: 'reminders',
+      }
+    }
+    if (introRequiresStep) {
+      return {
+        text: t('contactNextActionIntro'),
+        button: t('contactNextActionIntroButton'),
+        action: 'introductions',
+      }
+    }
+    if (shouldTouch) {
+      return {
+        text: t('contactNextActionTouch'),
+        button: t('contactNextActionTouchButton'),
+        action: 'touch',
+      }
+    }
+    return {
+      text: nextReminder
+        ? `${t('contactHeaderActionContactBy')} ${new Date(nextReminder.due_at).toLocaleString()}`
+        : t('contactHeaderActionAddInteraction'),
+      button: t('contactNextActionDefaultButton'),
+      action: 'none',
+    }
+  }, [introRequiresStep, nextReminder, overdueReminder, shouldTouch])
 
   const handleAssistantMessageSubmit = async (payload: { task: string; reason?: string; due_at?: string }) => {
     if (!contact || assistantSubmitting) return
@@ -566,106 +660,155 @@ export default function ContactCardPage({
     }
   }
 
+  const handleExportPdf = async () => {
+    if (!exportRef.current || !contact || exportingPdf) return
+    setExportingPdf(true)
+    try {
+      const canvas = await html2canvas(exportRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true,
+      })
+      const imgData = canvas.toDataURL('image/png')
+      const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4', compress: true })
+      const imgProps = pdf.getImageProperties(imgData)
+      const pdfWidth = pdf.internal.pageSize.getWidth()
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width
+      const pageHeight = pdf.internal.pageSize.getHeight()
+
+      let heightLeft = pdfHeight
+      let position = 0
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight, undefined, 'FAST')
+      heightLeft -= pageHeight
+
+      while (heightLeft > 0) {
+        position = heightLeft - pdfHeight
+        pdf.addPage()
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight, undefined, 'FAST')
+        heightLeft -= pageHeight
+      }
+
+      pdf.save(`contact-${contact.id}.pdf`)
+      toast.success(t('contactExportPdfSuccess'))
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      const message = import.meta.env.DEV && detail ? `${t('contactExportPdfFailed')}: ${detail}` : t('contactExportPdfFailed')
+      toast.error(message)
+    } finally {
+      setExportingPdf(false)
+    }
+  }
+
   return (
     <section style={{ marginTop: 16 }}>
       <Link to="/contacts" style={{ textDecoration: 'none', color: '#1f5eff' }}>
         {t('contactBackToList')}
       </Link>
 
-      <div style={{ marginTop: 12 }} data-testid="contact-header">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <h2 style={{ marginBottom: 6 }}>{t('contactCardTitle')}</h2>
-          {contact &&
-            (isEditing ? (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setIsEditing(false)
-                  }}
-                  dataTestId="contact-edit-cancel"
-                >
-                  {t('contactEditCancel')}
-                </Button>
-                <Button
-                  onClick={async () => {
-                    if (!contact) return
-                    if (!editForm.displayName.trim()) {
-                      toast.error(t('toastActionFailed'))
-                      return
-                    }
-                    setEditSubmitting(true)
-                    try {
-                      const normalizedTier =
-                        editForm.tier === 'A' || editForm.tier === 'B' || editForm.tier === 'C'
-                          ? (editForm.tier as CadenceTier)
-                          : null
-                      const nextTags = applyTierToTags(contact.tags, normalizedTier)
-                      const payload: Record<string, unknown> = {
-                        display_name: editForm.displayName.trim(),
-                        emails: parseListInput(editForm.emails),
-                        phones: parseListInput(editForm.phones),
-                        messengers: parseMessengers(editForm.messengers),
-                        job_title: editForm.jobTitle.trim() || null,
-                        industries: parseListInput(editForm.industries),
-                        competencies: parseListInput(editForm.competencies),
-                        met_context: editForm.metContext.trim() || null,
-                        visibility: editForm.visibility,
-                        tags: nextTags,
-                      }
-                      if (!isLimitedForAssistant) {
-                        payload.shared_notes = editForm.sharedNotes.trim() || null
-                        payload.private_notes = editForm.privateNotes.trim() || null
-                      }
-                      const updated = await updateContact(contact.id, payload)
-                      if (updated) {
-                        setContact(updated)
-                        toast.success(t('toastSaved'))
-                        setIsEditing(false)
-                      }
-                    } catch (err) {
-                      const detail = err instanceof Error ? err.message : String(err)
-                      const message = import.meta.env.DEV && detail ? `${t('toastActionFailed')}: ${detail}` : t('toastActionFailed')
-                      toast.error(message)
-                    } finally {
-                      setEditSubmitting(false)
-                    }
-                  }}
-                  loading={editSubmitting}
-                  loadingLabel={t('contactsSavingLabel')}
-                  dataTestId="contact-edit-save"
-                >
-                  {t('contactEditSave')}
-                </Button>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: 8 }}>
-                {role === 'assistant' && (
-                  <Button variant="secondary" onClick={() => setAssistantModalOpen(true)}>
-                    {t('assistantMessageButton')}
+      <div ref={exportRef}>
+        <div style={{ marginTop: 12 }} data-testid="contact-header">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <h2 style={{ marginBottom: 6 }}>{t('contactCardTitle')}</h2>
+            {contact &&
+              (isEditing ? (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setIsEditing(false)
+                    }}
+                    dataTestId="contact-edit-cancel"
+                  >
+                    {t('contactEditCancel')}
                   </Button>
-                )}
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    if (!contact) return
-                    setEditForm(buildEditForm(contact))
-                    setIsEditing(true)
-                  }}
-                  dataTestId="contact-edit"
-                >
-                  {t('contactEditButton')}
-                </Button>
-              </div>
-            ))}
+                  <Button
+                    onClick={async () => {
+                      if (!contact) return
+                      if (!editForm.displayName.trim()) {
+                        toast.error(t('toastActionFailed'))
+                        return
+                      }
+                      setEditSubmitting(true)
+                      try {
+                        const normalizedTier =
+                          editForm.tier === 'A' || editForm.tier === 'B' || editForm.tier === 'C'
+                            ? (editForm.tier as CadenceTier)
+                            : null
+                        const nextTags = applyTierToTags(contact.tags, normalizedTier)
+                        const payload: Record<string, unknown> = {
+                          display_name: editForm.displayName.trim(),
+                          emails: parseListInput(editForm.emails),
+                          phones: parseListInput(editForm.phones),
+                          messengers: parseMessengers(editForm.messengers),
+                          job_title: editForm.jobTitle.trim() || null,
+                          industries: parseListInput(editForm.industries),
+                          competencies: parseListInput(editForm.competencies),
+                          met_context: editForm.metContext.trim() || null,
+                          visibility: editForm.visibility,
+                          tags: nextTags,
+                        }
+                        const trimmedCompany = editForm.company.trim()
+                        if (trimmedCompany) {
+                          payload.organization_id = await resolveOrganizationId(trimmedCompany)
+                        } else {
+                          payload.organization_id = null
+                        }
+                        if (!isLimitedForAssistant) {
+                          payload.shared_notes = editForm.sharedNotes.trim() || null
+                          payload.private_notes = editForm.privateNotes.trim() || null
+                        }
+                        const updated = await updateContact(contact.id, payload)
+                        if (updated) {
+                          setContact(updated)
+                          toast.success(t('toastSaved'))
+                          setIsEditing(false)
+                        }
+                      } catch (err) {
+                        const detail = err instanceof Error ? err.message : String(err)
+                        const message = import.meta.env.DEV && detail ? `${t('toastActionFailed')}: ${detail}` : t('toastActionFailed')
+                        toast.error(message)
+                      } finally {
+                        setEditSubmitting(false)
+                      }
+                    }}
+                    loading={editSubmitting}
+                    loadingLabel={t('contactsSavingLabel')}
+                    dataTestId="contact-edit-save"
+                  >
+                    {t('contactEditSave')}
+                  </Button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {role === 'assistant' && (
+                    <Button variant="secondary" onClick={() => setAssistantModalOpen(true)}>
+                      {t('assistantMessageButton')}
+                    </Button>
+                  )}
+                  <Button variant="secondary" onClick={handleExportPdf} loading={exportingPdf} loadingLabel={t('contactExportPdfLoading')}>
+                    {t('contactExportPdfButton')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      if (!contact) return
+                      setEditForm(buildEditForm(contact))
+                      setIsEditing(true)
+                    }}
+                    dataTestId="contact-edit"
+                  >
+                    {t('contactEditButton')}
+                  </Button>
+                </div>
+              ))}
+          </div>
+          {loading && <Alert type="info">{t('contactsLoading')}</Alert>}
+          {error && <Alert type="error">{t('contactsLoadFailed')}</Alert>}
+          {!loading && !contact && !error && <Alert type="info">{t('timelineContactMissing')}</Alert>}
         </div>
-        {loading && <Alert type="info">{t('contactsLoading')}</Alert>}
-        {error && <Alert type="error">{t('contactsLoadFailed')}</Alert>}
-        {!loading && !contact && !error && <Alert type="info">{t('timelineContactMissing')}</Alert>}
-      </div>
 
-      {contact && (
-        <div style={{ marginTop: 12, display: 'grid', gap: 12 }}>
+        {contact && (
+          <div style={{ marginTop: 12, display: 'grid', gap: 12 }}>
           <div
             style={{
               display: 'grid',
@@ -696,9 +839,43 @@ export default function ContactCardPage({
                 <div style={{ color: '#666' }}>{t('contactHeaderNoReminders')}</div>
               )}
             </div>
-            <div style={{ padding: 12, borderRadius: 10, border: '1px solid #e5e7eb' }}>
+            <div
+              style={{ padding: 12, borderRadius: 10, border: '1px solid #e5e7eb' }}
+              data-testid="next-action-card"
+              data-action={nextAction.action}
+            >
               <div style={{ fontWeight: 600, marginBottom: 6 }}>{t('contactHeaderNextAction')}</div>
-              <div style={{ fontSize: 14 }}>{nextActionText}</div>
+              <div style={{ fontSize: 14 }} data-testid="next-action-text">
+                {nextAction.text}
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    if (!contactId) return
+                    if (nextAction.action === 'reminders') {
+                      navigate('/today')
+                      return
+                    }
+                    if (nextAction.action === 'introductions') {
+                      navigate('/introductions')
+                      return
+                    }
+                    if (nextAction.action === 'touch') {
+                      const params = new URLSearchParams({
+                        action: 'interaction',
+                        interaction_type: 'message',
+                        interaction_summary: t('contactNextActionTouchSummary'),
+                        tab: 'timeline',
+                      })
+                      navigate(`/contacts/${contactId}?${params.toString()}`)
+                    }
+                  }}
+                  dataTestId="contact-next-action"
+                >
+                  {nextAction.button}
+                </Button>
+              </div>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -875,7 +1052,17 @@ export default function ContactCardPage({
                       )}
                     </div>
                     <div>
-                      {t('contactCompanyLabel')}: {company || t('contactNotSet')}
+                      {isEditing ? (
+                        <TextField
+                          label={t('contactCompanyLabel')}
+                          value={editForm.company}
+                          onChange={(value) => setEditForm((prev) => ({ ...prev, company: value }))}
+                        />
+                      ) : (
+                        <>
+                          {t('contactCompanyLabel')}: {company || t('contactNotSet')}
+                        </>
+                      )}
                     </div>
                     <div>
                       {isEditing ? (
@@ -1057,6 +1244,51 @@ export default function ContactCardPage({
                   {t('timelineShown')}: {filteredTimeline.length}
                 </div>
               </div>
+            {followUpPromptOpen && contact && (
+              <div
+                style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 10, display: 'grid', gap: 10 }}
+                data-testid="follow-up-prompt"
+              >
+                <div style={{ fontWeight: 600 }}>{t('followUpPromptTitle')}</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => createFollowUpReminder(3)}
+                    loading={followUpSubmitting}
+                    disabled={followUpSubmitting}
+                    dataTestId="follow-up-3"
+                  >
+                    {t('followUpIn3')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => createFollowUpReminder(7)}
+                    loading={followUpSubmitting}
+                    disabled={followUpSubmitting}
+                    dataTestId="follow-up-7"
+                  >
+                    {t('followUpIn7')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => createFollowUpReminder(14)}
+                    loading={followUpSubmitting}
+                    disabled={followUpSubmitting}
+                    dataTestId="follow-up-14"
+                  >
+                    {t('followUpIn14')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setFollowUpPromptOpen(false)}
+                    disabled={followUpSubmitting}
+                    dataTestId="follow-up-skip"
+                  >
+                    {t('followUpSkip')}
+                  </Button>
+                </div>
+              </div>
+            )}
               {timelineLoading && <Alert type="info">{t('contactsLoading')}</Alert>}
               {timelineError && (
                 <Alert type="error">
@@ -1372,6 +1604,7 @@ export default function ContactCardPage({
           </div>
         </div>
       )}
+      </div>
       <AssistantMessageModal
         open={assistantModalOpen}
         targetLabel={contact ? `${t('assistantMessageTargetContact')}: ${contact.display_name}` : null}

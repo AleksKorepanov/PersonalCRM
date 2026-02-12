@@ -30,7 +30,7 @@ export default function Select({
 }: SelectProps) {
   return (
     <label style={{ display: 'grid', gap: 6, width: '100%' }}>
-      <span style={{ fontSize: 13, color: '#333' }}>
+      <span style={{ fontSize: 'var(--font-sm)', color: 'var(--color-text)' }}>
         {label}
         {required ? ' *' : ''}
       </span>
@@ -41,10 +41,11 @@ export default function Select({
         disabled={disabled}
         data-testid={dataTestId}
         style={{
-          padding: '8px 10px',
-          borderRadius: 8,
-          border: `1px solid ${error ? '#d14343' : '#d1d5db'}`,
-          background: disabled ? '#f5f5f5' : '#fff',
+          padding: 'var(--space-2) var(--space-3)',
+          borderRadius: 'var(--radius-md)',
+          border: `1px solid ${error ? '#d14343' : 'var(--color-border)'}`,
+          background: disabled ? '#f5f5f5' : 'var(--color-surface)',
+          fontSize: 'var(--font-md)',
         }}
       >
         {options.map((option) => (
@@ -53,7 +54,7 @@ export default function Select({
           </option>
         ))}
       </select>
-      {error && <span style={{ fontSize: 12, color: '#b00020' }}>{error}</span>}
+      {error && <span style={{ fontSize: 'var(--font-xs)', color: '#b00020' }}>{error}</span>}
     </label>
   )
 }

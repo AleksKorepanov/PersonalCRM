@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import Button from '../components/ui/Button'
+import SectionHeader from '../components/ui/SectionHeader'
 import TextField from '../components/ui/TextField'
 import { t } from '../i18n/t'
 import { DEFAULT_CADENCE, loadCadenceConfig, saveCadenceConfig } from '../utils/cadence'
@@ -42,8 +43,8 @@ export default function StrategyPage() {
   }
 
   return (
-    <section style={{ marginTop: 16 }}>
-      <h2>{t('cadenceSettingsTitle')}</h2>
+    <section style={{ marginTop: 'var(--space-3)' }}>
+      <SectionHeader title={t('cadenceSettingsTitle')} />
       <div style={{ color: '#666', marginBottom: 12 }}>{t('cadenceSettingsDescription')}</div>
       <div style={{ display: 'grid', gap: 12, maxWidth: 420 }}>
         <TextField

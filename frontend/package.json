@@ -15,6 +15,8 @@
     "check:ru": "rg -n \"\\\"[^\\\"]*\\b(Save|Cancel|Search|Create|Delete|Edit|Contact|Project|Reminder|Interaction|Introduction|Week|Panel|Status|Done|Close|Open|Settings|Update|Remove|Add|Send|Copy|Success|Error|Info|Loading|Retry|Owner|Assistant|Role|Filter|Import|Export|Follow-up)s?\\b[^\\\"]*\\\"|'[^']*\\b(Save|Cancel|Search|Create|Delete|Edit|Contact|Project|Reminder|Interaction|Introduction|Week|Panel|Status|Done|Close|Open|Settings|Update|Remove|Add|Send|Copy|Success|Error|Info|Loading|Retry|Owner|Assistant|Role|Filter|Import|Export|Follow-up)s?\\b[^']*'\" src | rg -v \"X-Debug-Role|data-testid|dataTestId\" && exit 1 || exit 0"
   },
   "dependencies": {
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.12.0"

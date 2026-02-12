@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import SectionHeader from '../components/ui/SectionHeader'
 import type { Contact, Interaction } from '../types'
 import { t } from '../i18n/t'
 
@@ -36,8 +37,8 @@ export default function TimelinePage({
   }
 
   return (
-    <section style={{ marginTop: 16 }}>
-      <h2>{t('timelineTitle')}</h2>
+    <section style={{ marginTop: 'var(--space-3)' }}>
+      <SectionHeader title={t('timelineTitle')} />
       {loading && <div>{t('contactsLoading')}</div>}
       {!loading && !selectedContact && <div>{t('timelineContactMissing')}</div>}
       {selectedContact && (

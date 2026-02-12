@@ -22,8 +22,8 @@ def list_contact_interactions(
     from_: Optional[str] = Query(None, alias="from"),
     to: Optional[str] = Query(None),
     type: Optional[List[InteractionType]] = Query(None),
-    conn=Depends(get_db),
     ctx=Depends(require_permission("interactions.read")),
+    conn=Depends(get_db),
 ):
     items, next_cursor = interactions_svc.list_interactions(
         conn,

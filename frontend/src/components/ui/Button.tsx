@@ -26,10 +26,10 @@ export default function Button({
 }: ButtonProps) {
   const isDisabled = disabled || loading
   const baseStyle: React.CSSProperties = {
-    padding: '8px 14px',
-    borderRadius: 8,
+    padding: 'var(--space-2) var(--space-3)',
+    borderRadius: 'var(--radius-md)',
     border: '1px solid transparent',
-    fontSize: 14,
+    fontSize: 'var(--font-md)',
     cursor: isDisabled ? 'not-allowed' : 'pointer',
     opacity: isDisabled ? 0.7 : 1,
     transition: 'background 0.2s ease',
@@ -37,8 +37,8 @@ export default function Button({
 
   const variantStyle: React.CSSProperties =
     variant === 'secondary'
-      ? { background: '#f3f4f6', color: '#222', borderColor: '#e5e7eb' }
-      : { background: '#1f5eff', color: '#fff' }
+      ? { background: '#f3f4f6', color: 'var(--color-text)', borderColor: 'var(--color-border)' }
+      : { background: 'var(--color-primary)', color: '#fff' }
 
   return (
     <button

@@ -19,5 +19,8 @@ class Settings(BaseSettings):
 
     database_url: str
 
+    rate_limit_per_minute: int = 60
+    rate_limit_window_seconds: int = 60
+
 
 settings = Settings()

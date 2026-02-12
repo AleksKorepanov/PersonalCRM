@@ -14,7 +14,7 @@ def test_dev_mode_allows_contacts_without_token(monkeypatch):
     with TestClient(create_app()) as client:
         health = client.get("/health")
         assert health.status_code == 200
-        assert health.text == "ok"
+        assert health.json()["status"] == "ok"
 
         contacts = client.get("/api/v1/contacts", params={"workspace_id": workspace_id})
         assert contacts.status_code == 200

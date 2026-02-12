@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
+import SectionHeader from '../components/ui/SectionHeader'
 import { t } from '../i18n/t'
 import type { Contact, Interaction } from '../types'
 import { loadCadenceConfig, parseTierFromTags, type CadenceTier } from '../utils/cadence'
@@ -113,8 +114,8 @@ export default function StaleContactsPage({
   }
 
   return (
-    <section style={{ marginTop: 16 }}>
-      <h2>{t('staleContactsTitle')}</h2>
+    <section style={{ marginTop: 'var(--space-3)' }}>
+      <SectionHeader title={t('staleContactsTitle')} />
       <div style={{ color: '#666', marginBottom: 12 }}>{t('staleContactsDescription')}</div>
       {contactsLoading && <Alert type="info">{t('contactsLoading')}</Alert>}
       {contactError && (

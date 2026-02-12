@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
+import SectionHeader from '../components/ui/SectionHeader'
 import Select from '../components/ui/Select'
 import TextField from '../components/ui/TextField'
 import { t } from '../i18n/t'
@@ -100,7 +101,7 @@ export default function AuditPage({ role, apiRequest }: AuditPageProps) {
 
   return (
     <section style={{ marginTop: 16 }} data-testid="audit-page">
-      <h2>{t('menuAudit')}</h2>
+      <SectionHeader title={t('menuAudit')} />
       <div style={{ marginTop: 12, padding: 12, border: '1px solid #e5e7eb', borderRadius: 12 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>{t('auditFiltersTitle')}</div>
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>

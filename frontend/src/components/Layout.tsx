@@ -61,26 +61,33 @@ export default function Layout({
   }
   const navLinkStyle = ({ isActive }: { isActive: boolean }) => ({
     display: 'block',
-    padding: '10px 12px',
-    borderRadius: 8,
+    padding: 'var(--space-2) var(--space-3)',
+    borderRadius: 'var(--radius-md)',
     textDecoration: 'none',
-    color: isActive ? '#0b5fff' : '#222',
+    color: isActive ? 'var(--color-primary)' : 'var(--color-text)',
     background: isActive ? '#eef4ff' : 'transparent',
+    fontSize: 'var(--font-md)',
   })
 
   return (
-    <div style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif', minHeight: '100vh' }}>
-      <div style={{ display: 'flex', minHeight: '100vh' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--color-bg)' }}>
+      <div style={{ minHeight: '100vh' }}>
         <aside
           style={{
-            width: 240,
-            padding: 16,
-            borderRight: '1px solid #e6e6e6',
-            background: '#fafafa',
+            position: 'fixed',
+            inset: 0,
+            right: 'auto',
+            width: 'var(--layout-sidebar-width)',
+            padding: 'var(--space-4)',
+            borderRight: '1px solid var(--color-border)',
+            background: 'var(--color-surface)',
+            overflowY: 'auto',
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: 16 }}>{t('appName')}</div>
-          <nav style={{ display: 'grid', gap: 4 }}>
+          <div style={{ fontWeight: 700, marginBottom: 'var(--space-4)', fontSize: 'var(--font-lg)' }}>
+            {t('appName')}
+          </div>
+          <nav style={{ display: 'grid', gap: 'var(--space-1)' }}>
             <NavLink data-testid="nav-contacts" to="/contacts" style={navLinkStyle}>
               {t('menuContacts')}
             </NavLink>
@@ -114,15 +121,25 @@ export default function Layout({
           </nav>
         </aside>
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div
+          style={{
+            marginLeft: 'var(--layout-sidebar-width)',
+            minHeight: '100vh',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
           <header
             style={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 10,
               display: 'flex',
               alignItems: 'center',
-              gap: 12,
-              padding: '12px 20px',
-              borderBottom: '1px solid #e6e6e6',
-              background: '#fff',
+              gap: 'var(--space-3)',
+              padding: 'var(--space-3) var(--space-5)',
+              borderBottom: '1px solid var(--color-border)',
+              background: 'var(--color-surface)',
             }}
           >
             <div style={{ flex: 1, position: 'relative' }}>
@@ -141,13 +158,13 @@ export default function Layout({
                     top: '100%',
                     left: 0,
                     right: 0,
-                    marginTop: 6,
-                    background: '#fff',
-                    border: '1px solid #e6e6e6',
-                    borderRadius: 10,
-                    boxShadow: '0 10px 25px rgba(0,0,0,0.08)',
+                    marginTop: 'var(--space-2)',
+                    background: 'var(--color-surface)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius-lg)',
+                    boxShadow: 'var(--shadow-md)',
                     zIndex: 50,
-                    padding: 10,
+                    padding: 'var(--space-3)',
                     maxHeight: 360,
                     overflowY: 'auto',
                   }}
@@ -277,10 +294,10 @@ export default function Layout({
                 />
               </div>
             ) : null}
-            <div style={{ fontSize: 14, color: '#444' }} data-testid="role-indicator">
+            <div style={{ fontSize: 'var(--font-sm)', color: 'var(--color-text)' }} data-testid="role-indicator">
               {t('roleLabel')}: {resolvedRoleLabel}
             </div>
-            <div style={{ fontSize: 14, color: '#666' }}>
+            <div style={{ fontSize: 'var(--font-sm)', color: 'var(--color-muted)' }}>
               {t('userLabel')}: {userEmail ?? t('emptyValue')}
             </div>
             <Button onClick={onCreate ?? (() => alert(t('createSoonAlert')))} dataTestId="create-button">
@@ -288,7 +305,9 @@ export default function Layout({
             </Button>
           </header>
 
-          <main style={{ padding: 20, flex: 1 }}>{children}</main>
+          <main style={{ padding: 'var(--space-6) var(--space-6)', flex: 1 }}>
+            <div style={{ maxWidth: 'var(--layout-content-max)', margin: '0 auto' }}>{children}</div>
+          </main>
         </div>
       </div>
     </div>

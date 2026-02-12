@@ -42,15 +42,34 @@ export class ApiHelper {
   private workspaceCache = new Map<Role, string>()
   private createdContacts: string[] = []
   private baseUrl: string
+  private healthChecked = false
 
   constructor(request: APIRequestContext) {
     this.request = request
     this.baseUrl = process.env.PLAYWRIGHT_API_URL || 'http://localhost:8000'
   }
 
+  private async ensureBackendReady() {
+    if (this.healthChecked) return
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      try {
+        const res = await this.request.get(`${this.baseUrl}/health`)
+        if (res.ok()) {
+          this.healthChecked = true
+          return
+        }
+      } catch {
+        // ignore and retry
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
+    throw new Error('Backend health check failed')
+  }
+
   async getWorkspaceId(role: Role = 'owner') {
     const cached = this.workspaceCache.get(role)
     if (cached) return cached
+    await this.ensureBackendReady()
     const res = await this.request.get(`${this.baseUrl}/api/v1/me`, {
       headers: { 'X-Debug-Role': role },
     })
@@ -116,6 +135,32 @@ export class ApiHelper {
   async createReminder(payload: ReminderPayload, role: Role = 'owner') {
     const body = { ...payload, type: payload.type || 'follow_up' }
     return this.apiRequest(role, 'POST', '/api/v1/reminders', body)
+  }
+
+  async listReminders(role: Role = 'owner') {
+    return this.apiRequest<{ data: Array<{ id: string; contact_id?: string | null }> }>(role, 'GET', '/api/v1/reminders')
+  }
+
+  async importCalendar(events: Array<{ summary: string; start: string; attendees: string[] }>, role: Role = 'owner') {
+    const workspaceId = await this.getWorkspaceId(role)
+    const url = new URL('/api/v1/calendar/import', this.baseUrl)
+    url.searchParams.set('workspace_id', workspaceId)
+    const payload = JSON.stringify({ events })
+    const res = await this.request.post(url.toString(), {
+      headers: { 'X-Debug-Role': role },
+      multipart: {
+        file: {
+          name: 'events.json',
+          mimeType: 'application/json',
+          buffer: Buffer.from(payload, 'utf-8'),
+        },
+      },
+    })
+    const text = await res.text()
+    if (!res.ok()) {
+      throw new Error(`API POST /api/v1/calendar/import failed: ${res.status()} ${text}`)
+    }
+    return text ? JSON.parse(text) : null
   }
 
   async createIntroduction(payload: IntroductionPayload, role: Role = 'owner') {

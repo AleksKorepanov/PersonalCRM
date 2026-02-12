@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import type { Contact, DuplicateGroup } from '../types'
 import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
+import SectionHeader from '../components/ui/SectionHeader'
 import { t } from '../i18n/t'
 import { useToast } from '../components/ui/Toast'
 
@@ -104,13 +105,15 @@ export default function DuplicatesPage({ loadDuplicates, mergeContacts }: Duplic
   }
 
   return (
-    <section style={{ marginTop: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <h2>{t('duplicatesTitle')}</h2>
-        <Button variant="secondary" onClick={load} disabled={loading} dataTestId="duplicates-refresh">
-          {t('duplicatesRefresh')}
-        </Button>
-      </div>
+    <section style={{ marginTop: 'var(--space-3)' }}>
+      <SectionHeader
+        title={t('duplicatesTitle')}
+        actions={
+          <Button variant="secondary" onClick={load} disabled={loading} dataTestId="duplicates-refresh">
+            {t('duplicatesRefresh')}
+          </Button>
+        }
+      />
 
       {loading && <Alert type="info">{t('duplicatesLoading')}</Alert>}
       {error && (

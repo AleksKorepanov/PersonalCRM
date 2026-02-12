@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
+import SectionHeader from '../components/ui/SectionHeader'
 import { useToast } from '../components/ui/Toast'
 import { t } from '../i18n/t'
 import type { ApiRequestOptions, AuditEvent, Contact, Interaction, Introduction, Reminder } from '../types'
@@ -287,9 +288,9 @@ export default function TodayPage({
   }
 
   return (
-    <section style={{ marginTop: 16 }} data-testid="today-page">
-      <h2>{t('todayTitle')}</h2>
-      <div style={{ display: 'grid', gap: 16 }}>
+    <section style={{ marginTop: 'var(--space-3)' }} data-testid="today-page">
+      <SectionHeader title={t('todayTitle')} />
+      <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
         <div style={{ display: 'grid', gap: 12 }} data-testid="today-reminders-section">
           <div style={{ fontWeight: 600 }}>{t('todayRemindersTitle')}</div>
           {remindersLoading && <Alert type="info">{t('contactsLoading')}</Alert>}

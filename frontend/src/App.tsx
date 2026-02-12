@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import Layout from './components/Layout'
+import CommandPalette from './components/CommandPalette'
 import { t } from './i18n/t'
 import ContactCardPage from './pages/ContactCardPage'
 import ContactsPage from './pages/ContactsPage'
@@ -22,12 +23,14 @@ import type {
   DuplicateGroup,
   ImportReport,
   Interaction,
+  Introduction,
   MeResponse,
   Reminder,
   SearchResults,
 } from './types'
 
 export default function App() {
+  const navigate = useNavigate()
   const apiBase = useMemo(() => import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000', [])
   const isDevMode = import.meta.env.DEV
   const [debugRole, setDebugRole] = useState<'owner' | 'assistant'>(() => {
@@ -57,6 +60,8 @@ export default function App() {
   const [contactSubmitError, setContactSubmitError] = useState<string | null>(null)
   const [contactSubmitting, setContactSubmitting] = useState(false)
   const [contactModalOpen, setContactModalOpen] = useState(false)
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [commandQuery, setCommandQuery] = useState('')
 
   const [interactions, setInteractions] = useState<Interaction[]>([])
   const [interactionForm, setInteractionForm] = useState({
@@ -280,6 +285,18 @@ export default function App() {
     [apiRequest, workspaceId],
   )
 
+  const loadIntroductionsForContact = useCallback(
+    async (contactId: string) => {
+      const wsId = workspaceId || (await fetchWorkspaceId())
+      if (!wsId) return []
+      const res = await apiRequest<{ data: Introduction[] }>('/api/v1/introductions', {
+        params: { contact_id: contactId, limit: 200 },
+      })
+      return res.data || []
+    },
+    [apiRequest, fetchWorkspaceId, workspaceId],
+  )
+
   const loadTimeline = useCallback(
     async (contactId: string) => {
       if (!workspaceId) return
@@ -384,6 +401,25 @@ export default function App() {
       setContacts((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       setSelectedContact(updated)
       return updated
+    },
+    [apiRequest, workspaceId],
+  )
+
+  const resolveOrganizationId = useCallback(
+    async (name: string) => {
+      if (!workspaceId) return null
+      const trimmed = name.trim()
+      if (!trimmed) return null
+      const list = await apiRequest<Array<{ id: string; name: string }>>('/api/v1/organizations', {
+        params: { q: trimmed, limit: 50 },
+      })
+      const existing = list.find((item) => item.name.toLowerCase() === trimmed.toLowerCase())
+      if (existing) return existing.id
+      const created = await apiRequest<{ id: string }>('/api/v1/organizations', {
+        method: 'POST',
+        body: { name: trimmed },
+      })
+      return created.id
     },
     [apiRequest, workspaceId],
   )
@@ -534,6 +570,87 @@ export default function App() {
     </div>
   )
 
+  const visibleContactsForPalette =
+    debugRole === 'assistant' ? contacts.filter((contact) => contact.visibility !== 'private') : contacts
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setCommandPaletteOpen((prev) => !prev)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  const closePalette = () => {
+    setCommandPaletteOpen(false)
+    setCommandQuery('')
+  }
+
+  const paletteCommands = [
+    {
+      id: 'create-contact',
+      label: t('commandCreateContact'),
+      onSelect: () => {
+        navigate('/contacts')
+        setContactModalOpen(true)
+        setContactFormErrors({})
+        setContactSubmitError(null)
+        closePalette()
+      },
+    },
+    {
+      id: 'contacts',
+      label: t('commandGoContacts'),
+      onSelect: () => {
+        navigate('/contacts')
+        closePalette()
+      },
+    },
+    {
+      id: 'reminders',
+      label: t('commandGoReminders'),
+      onSelect: () => {
+        navigate('/reminders')
+        closePalette()
+      },
+    },
+    {
+      id: 'introductions',
+      label: t('commandGoIntroductions'),
+      onSelect: () => {
+        navigate('/introductions')
+        closePalette()
+      },
+    },
+    {
+      id: 'projects',
+      label: t('commandGoProjects'),
+      onSelect: () => {
+        navigate('/projects')
+        closePalette()
+      },
+    },
+    {
+      id: 'strategy',
+      label: t('commandGoStrategy'),
+      onSelect: () => {
+        navigate('/strategy')
+        closePalette()
+      },
+    },
+    {
+      id: 'week',
+      label: t('commandGoWeekPanel'),
+      onSelect: () => {
+        navigate('/week')
+        closePalette()
+      },
+    },
+  ]
+
   return (
     <ToastProvider>
       <Layout
@@ -549,6 +666,18 @@ export default function App() {
         devRole={debugRole}
         onDevRoleChange={setDebugRole}
       >
+        <CommandPalette
+          open={commandPaletteOpen}
+          query={commandQuery}
+          onQueryChange={setCommandQuery}
+          onClose={closePalette}
+          commands={paletteCommands}
+          contacts={visibleContactsForPalette}
+          onSelectContact={(contactId) => {
+            navigate(`/contacts/${contactId}`)
+            closePalette()
+          }}
+        />
         <p style={{ color: '#666', marginTop: 0 }}>{t('appTagline')}</p>
         {workspaceHint}
 
@@ -613,6 +742,7 @@ export default function App() {
               role={debugRole}
               loadContact={loadContactById}
               updateContact={updateContact}
+              resolveOrganizationId={resolveOrganizationId}
               loadInteractions={loadContactInteractions}
               createInteraction={createInteraction}
               createReminder={createReminder}
@@ -620,6 +750,7 @@ export default function App() {
               createIntroduction={createIntroduction}
               searchContacts={searchContacts}
               loadRemindersForContact={loadRemindersForContact}
+              loadIntroductionsForContact={loadIntroductionsForContact}
               createAssistantMessage={createAssistantMessage}
             />
           }

@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import AssistantMessageModal from '../components/AssistantMessageModal'
+import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
+import SectionHeader from '../components/ui/SectionHeader'
 import { useToast } from '../components/ui/Toast'
 import type { AssistantMessageCreate, Reminder } from '../types'
 import { t } from '../i18n/t'
@@ -33,6 +35,21 @@ export default function RemindersPage({
   const [assistantSubmitting, setAssistantSubmitting] = useState(false)
   const [selectedReminder, setSelectedReminder] = useState<Reminder | null>(null)
 
+  const statusLabel = (status: string) => {
+    if (status === 'open') return t('remindersStatusOpen')
+    if (status === 'done') return t('remindersStatusDone')
+    return status
+  }
+
+  const typeLabel = (type: string) => {
+    if (type === 'follow_up') return t('remindersTypeFollowUp')
+    if (type === 'birthday') return t('remindersTypeBirthday')
+    if (type === 'anniversary') return t('remindersTypeAnniversary')
+    if (type === 'task') return t('remindersTypeTask')
+    if (type === 'custom') return t('remindersTypeCustom')
+    return type
+  }
+
   const handleAssistantMessageSubmit = async (payload: { task: string; reason?: string; due_at?: string }) => {
     if (!selectedReminder || assistantSubmitting) return
     setAssistantSubmitting(true)
@@ -57,10 +74,10 @@ export default function RemindersPage({
   }
 
   return (
-    <section style={{ marginTop: 16 }}>
-      <h2>{t('remindersTitle')}</h2>
-      {remindersLoading && <div>{t('contactsLoading')}</div>}
-      {reminderError && <div style={{ color: '#b00020' }}>{reminderError}</div>}
+    <section style={{ marginTop: 'var(--space-3)' }}>
+      <SectionHeader title={t('remindersTitle')} />
+      {remindersLoading && <Alert type="info">{t('contactsLoading')}</Alert>}
+      {reminderError && <Alert type="error">{reminderError}</Alert>}
       <div style={{ display: 'grid', gap: 8, maxWidth: 420 }}>
         <label>
           {t('remindersTypeLabel')}:
@@ -95,29 +112,54 @@ export default function RemindersPage({
         </button>
       </div>
 
-      <ul style={{ marginTop: 12 }} data-testid="reminders-list">
-        {reminders.map((item) => (
-          <li key={item.id} data-testid={`reminder-row-${item.id}`}>
-            {item.title || t('remindersUntitled')} — {item.type} — {new Date(item.due_at).toLocaleString()}
-            {role === 'assistant' && (
-              <div style={{ marginTop: 6 }}>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setSelectedReminder(item)
-                    setAssistantModalOpen(true)
-                  }}
-                >
-                  {t('assistantMessageButton')}
-                </Button>
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
-      <button data-testid="reminders-refresh" onClick={onRefreshReminders} style={{ marginTop: 8 }}>
-        {t('remindersRefresh')}
-      </button>
+      <div style={{ marginTop: 16 }} data-testid="reminders-table">
+        {!remindersLoading && !reminderError && reminders.length === 0 && (
+          <div style={{ padding: 12, border: '1px dashed #ddd', borderRadius: 8 }}>{t('remindersEmpty')}</div>
+        )}
+        {reminders.length > 0 && (
+          <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+              <thead style={{ background: '#f9fafb', textAlign: 'left' }}>
+                <tr>
+                  <th style={{ padding: '10px 12px' }}>{t('remindersTableTitle')}</th>
+                  <th style={{ padding: '10px 12px' }}>{t('remindersTableType')}</th>
+                  <th style={{ padding: '10px 12px' }}>{t('remindersTableStatus')}</th>
+                  <th style={{ padding: '10px 12px' }}>{t('remindersTableDue')}</th>
+                  <th style={{ padding: '10px 12px' }} />
+                </tr>
+              </thead>
+              <tbody>
+                {reminders.map((item) => (
+                  <tr key={item.id} style={{ borderTop: '1px solid #eef0f2' }} data-testid={`reminder-row-${item.id}`}>
+                    <td style={{ padding: '10px 12px' }}>{item.title || t('remindersUntitled')}</td>
+                    <td style={{ padding: '10px 12px' }}>{typeLabel(item.type)}</td>
+                    <td style={{ padding: '10px 12px' }}>{statusLabel(item.status)}</td>
+                    <td style={{ padding: '10px 12px' }}>{new Date(item.due_at).toLocaleString()}</td>
+                    <td style={{ padding: '10px 12px' }}>
+                      {role === 'assistant' && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            setSelectedReminder(item)
+                            setAssistantModalOpen(true)
+                          }}
+                        >
+                          {t('assistantMessageButton')}
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <Button variant="secondary" dataTestId="reminders-refresh" onClick={onRefreshReminders}>
+          {t('remindersRefresh')}
+        </Button>
+      </div>
       <AssistantMessageModal
         open={assistantModalOpen}
         targetLabel={
