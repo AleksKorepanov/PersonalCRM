@@ -13,3 +13,4 @@ python-multipart==0.0.12
 prometheus-client==0.21.0
 pytest
 httpx
+email-validator==2.3.0

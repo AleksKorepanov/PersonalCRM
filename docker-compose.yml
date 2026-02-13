@@ -21,6 +21,8 @@ services:
     env_file: .env
     environment:
       CALENDAR_IMPORT_ENABLED: "1"
+      ICLOUD_MODE: ${ICLOUD_MODE:-real}
+      MOCK_ICLOUD_URL: ${MOCK_ICLOUD_URL:-http://mock-carddav:8080}
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,6 +44,19 @@ services:
     volumes:
       - ./frontend:/usr/src/app
       - frontend_node_modules:/usr/src/app/node_modules
+
+  mock-carddav:
+    build:
+      context: ./mock-carddav
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./mock-carddav-data:/data/carddav
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 volumes:
   pgdata:

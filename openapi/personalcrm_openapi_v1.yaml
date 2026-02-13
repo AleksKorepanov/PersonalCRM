@@ -28,6 +28,7 @@ tags:
   - name: Projects
   - name: RBAC
   - name: Audit
+  - name: iCloud
 
 paths:
   /api/v1/me:
@@ -1039,6 +1040,237 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/icloud/connect:
+    post:
+      tags: [iCloud]
+      summary: Подключить iCloud аккаунт
+      description: Подключает iCloud аккаунт для синхронизации контактов через CardDAV. Требует Apple ID и app-specific password. Только owner workspace может подключать аккаунт.
+      operationId: connectICloud
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ICloudConnectRequest'
+      responses:
+        '201':
+          description: iCloud аккаунт успешно подключен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ICloudAccount'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Аккаунт уже подключен для этого workspace
+
+  /api/v1/icloud/disconnect:
+    delete:
+      tags: [iCloud]
+      summary: Отключить iCloud аккаунт
+      description: Отключает iCloud аккаунт и прекращает синхронизацию. Удаляет все учетные данные. Только owner workspace может отключать аккаунт.
+      operationId: disconnectICloud
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      responses:
+        '204':
+          description: iCloud аккаунт успешно отключен
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: iCloud аккаунт не найден
+
+  /api/v1/icloud/status:
+    get:
+      tags: [iCloud]
+      summary: Получить статус подключения iCloud
+      description: Возвращает информацию о подключенном iCloud аккаунте, статусе синхронизации и последней ошибке (если есть).
+      operationId: getICloudStatus
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+      responses:
+        '200':
+          description: Статус iCloud аккаунта
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ICloudAccount'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: iCloud аккаунт не подключен
+
+  /api/v1/icloud/sync:
+    post:
+      tags: [iCloud]
+      summary: Запустить синхронизацию вручную
+      description: Запускает немедленную синхронизацию контактов с iCloud. Может выполняться асинхронно для больших объемов данных.
+      operationId: syncICloud
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - name: full
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Выполнить полную синхронизацию (по умолчанию инкрементальная)
+      responses:
+        '202':
+          description: Синхронизация запущена
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [started]
+                    description: Статус запуска синхронизации
+                  job_id:
+                    type: string
+                    nullable: true
+                    description: ID фоновой задачи (если синхронизация асинхронная)
+        '200':
+          description: Синхронизация завершена синхронно
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [completed]
+                  synced_count:
+                    type: integer
+                    description: Количество синхронизированных контактов
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: iCloud аккаунт не подключен
+
+  /api/v1/icloud/contacts:
+    get:
+      tags: [iCloud]
+      summary: Список iCloud контактов
+      description: Возвращает список контактов из iCloud с возможностью фильтрации и поиска. Показывает статус связи с CRM контактами.
+      operationId: listICloudContacts
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: linked_only
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Показать только связанные с CRM контакты
+        - name: unlinked_only
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Показать только несвязанные контакты
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Поиск по имени, телефону или email
+      responses:
+        '200':
+          description: Список iCloud контактов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedICloudContacts'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: iCloud аккаунт не подключен
+
+  /api/v1/icloud/contacts/{icloud_contact_id}:
+    get:
+      tags: [iCloud]
+      summary: Получить детали iCloud контакта
+      description: Возвращает полную информацию об iCloud контакте, включая все поля vCard и информацию о связи с CRM контактом.
+      operationId: getICloudContact
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/ICloudContactIdPath'
+      responses:
+        '200':
+          description: iCloud контакт
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ICloudContact'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/icloud/contacts/{icloud_contact_id}/link:
+    post:
+      tags: [iCloud]
+      summary: Связать iCloud контакт с CRM контактом
+      description: Создает связь между iCloud контактом и CRM контактом. Если связь уже существует, обновляет её. Позволяет указать способ связывания (автоматический или ручной).
+      operationId: linkICloudContact
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/ICloudContactIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactLinkRequest'
+      responses:
+        '201':
+          description: Связь успешно создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactLink'
+        '200':
+          description: Связь успешно обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactLink'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [iCloud]
+      summary: Отвязать iCloud контакт от CRM контакта
+      description: Удаляет связь между iCloud контактом и CRM контактом. Контакты остаются в своих системах, но больше не синхронизируются.
+      operationId: unlinkICloudContact
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdQuery'
+        - $ref: '#/components/parameters/ICloudContactIdPath'
+      responses:
+        '204':
+          description: Связь успешно удалена
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1110,6 +1342,14 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/UUID'
+
+    ICloudContactIdPath:
+      name: icloud_contact_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+      description: ID iCloud контакта
 
     Limit:
       name: limit
@@ -1884,3 +2124,336 @@ components:
           type: string
           nullable: true
       required: [data]
+
+    PaginatedICloudContacts:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ICloudContact' }
+        next_cursor:
+          type: string
+          nullable: true
+      required: [data]
+
+    ICloudConnectRequest:
+      type: object
+      properties:
+        apple_id:
+          type: string
+          format: email
+          description: Apple ID (email адрес)
+        app_password:
+          type: string
+          minLength: 16
+          description: App-specific password (формат xxxx-xxxx-xxxx-xxxx)
+      required: [apple_id, app_password]
+
+    ICloudAccount:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        apple_id:
+          type: string
+          format: email
+          description: Apple ID (замаскирован для безопасности)
+        sync_enabled:
+          type: boolean
+          description: Включена ли автоматическая синхронизация
+        last_sync_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Время последней успешной синхронизации
+        sync_error:
+          type: string
+          nullable: true
+          description: Текст последней ошибки синхронизации (если есть)
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [id, workspace_id, sync_enabled, created_at, updated_at]
+
+    StructuredName:
+      type: object
+      properties:
+        given_name:
+          type: string
+          nullable: true
+          description: Имя
+        middle_name:
+          type: string
+          nullable: true
+          description: Отчество
+        family_name:
+          type: string
+          nullable: true
+          description: Фамилия
+        prefix:
+          type: string
+          nullable: true
+          description: Префикс (г-н, г-жа и т.п.)
+        suffix:
+          type: string
+          nullable: true
+          description: Суффикс (Jr., Sr. и т.п.)
+      description: Структурированное имя контакта
+
+    ContactPhone:
+      type: object
+      properties:
+        label:
+          type: string
+          nullable: true
+          description: Метка (mobile, work, home и т.п.)
+        value:
+          type: string
+          description: Номер телефона
+        is_primary:
+          type: boolean
+          nullable: true
+          description: Основной телефон
+      required: [value]
+
+    ContactEmail:
+      type: object
+      properties:
+        label:
+          type: string
+          nullable: true
+          description: Метка (work, home и т.п.)
+        value:
+          type: string
+          format: email
+          description: Email адрес
+        is_primary:
+          type: boolean
+          nullable: true
+          description: Основной email
+      required: [value]
+
+    ContactAddress:
+      type: object
+      properties:
+        label:
+          type: string
+          nullable: true
+          description: Метка (work, home и т.п.)
+        street:
+          type: string
+          nullable: true
+          description: Улица и номер дома
+        city:
+          type: string
+          nullable: true
+          description: Город
+        region:
+          type: string
+          nullable: true
+          description: Регион/область
+        postal_code:
+          type: string
+          nullable: true
+          description: Почтовый индекс
+        country:
+          type: string
+          nullable: true
+          description: Страна
+      description: Адрес контакта
+
+    ContactUrl:
+      type: object
+      properties:
+        label:
+          type: string
+          nullable: true
+          description: Метка (homepage, work и т.п.)
+        url:
+          type: string
+          format: uri
+          description: URL
+        is_primary:
+          type: boolean
+          nullable: true
+          description: Основной URL
+      required: [url]
+
+    ContactIM:
+      type: object
+      properties:
+        label:
+          type: string
+          nullable: true
+          description: Метка
+        service:
+          type: string
+          nullable: true
+          description: Сервис (Telegram, WhatsApp и т.п.)
+        value:
+          type: string
+          description: Идентификатор в сервисе
+        is_primary:
+          type: boolean
+          nullable: true
+          description: Основной IM
+      required: [value]
+
+    ContactSocialProfile:
+      type: object
+      properties:
+        label:
+          type: string
+          nullable: true
+          description: Метка
+        service:
+          type: string
+          nullable: true
+          description: Сервис (Twitter, LinkedIn и т.п.)
+        username:
+          type: string
+          nullable: true
+          description: Имя пользователя
+        url:
+          type: string
+          format: uri
+          nullable: true
+          description: URL профиля
+      description: Социальный профиль
+
+    ContactDate:
+      type: object
+      properties:
+        label:
+          type: string
+          nullable: true
+          description: Метка (anniversary, custom и т.п.)
+        date:
+          type: string
+          format: date
+          description: Дата
+      required: [date]
+
+    ICloudContact:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        remote_uri:
+          type: string
+          description: URI ресурса в iCloud CardDAV
+        etag:
+          type: string
+          description: ETag для отслеживания изменений
+        display_name:
+          type: string
+          nullable: true
+          description: Отображаемое имя контакта
+        structured_name:
+          $ref: '#/components/schemas/StructuredName'
+          nullable: true
+          description: Структурированное имя
+        company:
+          type: string
+          nullable: true
+          description: Название компании
+        job_title:
+          type: string
+          nullable: true
+          description: Должность
+        department:
+          type: string
+          nullable: true
+          description: Отдел
+        phones:
+          type: array
+          items: { $ref: '#/components/schemas/ContactPhone' }
+          description: Телефоны
+        emails:
+          type: array
+          items: { $ref: '#/components/schemas/ContactEmail' }
+          description: Email адреса
+        addresses:
+          type: array
+          items: { $ref: '#/components/schemas/ContactAddress' }
+          description: Адреса
+        urls:
+          type: array
+          items: { $ref: '#/components/schemas/ContactUrl' }
+          description: URL адреса
+        ims:
+          type: array
+          items: { $ref: '#/components/schemas/ContactIM' }
+          description: Мгновенные сообщения
+        social_profiles:
+          type: array
+          items: { $ref: '#/components/schemas/ContactSocialProfile' }
+          description: Социальные профили
+        dates:
+          type: array
+          items: { $ref: '#/components/schemas/ContactDate' }
+          description: Даты (дни рождения, годовщины и т.п.)
+        notes:
+          type: string
+          nullable: true
+          description: Заметки
+        synced_at:
+          type: string
+          format: date-time
+          description: Время последней синхронизации
+        link:
+          $ref: '#/components/schemas/ContactLink'
+          nullable: true
+          description: Связь с CRM контактом (если есть)
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [id, workspace_id, remote_uri, etag, synced_at, created_at, updated_at]
+
+    ContactLinkRequest:
+      type: object
+      properties:
+        crm_contact_id:
+          $ref: '#/components/schemas/UUID'
+          description: ID CRM контакта для связывания
+        link_type:
+          type: string
+          enum: [auto, manual, phone_match, email_match]
+          default: manual
+          description: Тип связывания (auto - автоматическое, manual - ручное, phone_match - по телефону, email_match - по email)
+      required: [crm_contact_id]
+
+    ContactLink:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        workspace_id: { $ref: '#/components/schemas/UUID' }
+        crm_contact_id:
+          $ref: '#/components/schemas/UUID'
+          description: ID CRM контакта
+        icloud_contact_id:
+          $ref: '#/components/schemas/UUID'
+          description: ID iCloud контакта
+        link_type:
+          type: string
+          enum: [auto, manual, phone_match, email_match]
+          description: Тип связывания
+        matched_phone_norm:
+          type: string
+          nullable: true
+          description: Нормализованный телефон, по которому было найдено совпадение
+        link_status:
+          type: string
+          enum: [active, conflict, resolved]
+          default: active
+          description: Статус связи (active - активна, conflict - есть конфликт, resolved - разрешена)
+        confidence_score:
+          type: integer
+          minimum: 1
+          maximum: 100
+          nullable: true
+          description: Уровень уверенности в связывании (1-100, для автоматических связей)
+        linked_at: { type: string, format: date-time }
+        linked_by:
+          $ref: '#/components/schemas/UUID'
+          nullable: true
+          description: ID пользователя, создавшего связь
+      required: [id, workspace_id, crm_contact_id, icloud_contact_id, link_type, link_status, linked_at]

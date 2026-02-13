@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from app.api.v1 import me, workspaces, organizations, contacts, interactions, introductions, reminders, strategy, projects, rbac, audit, search, assistant_messages, calendar, email_import
+from app.api.v1 import me, workspaces, organizations, contacts, interactions, introductions, reminders, strategy, projects, rbac, audit, search, assistant_messages, calendar, email_import, icloud, users
 from app.core.deps import set_request_context
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(set_request_context)])
@@ -20,3 +20,5 @@ router.include_router(search.router, tags=["search"])
 router.include_router(assistant_messages.router, tags=["assistant"])
 router.include_router(calendar.router, tags=["calendar"])
 router.include_router(email_import.router, tags=["email"])
+router.include_router(icloud.router, tags=["iCloud"])
+router.include_router(users.router, tags=["users"])

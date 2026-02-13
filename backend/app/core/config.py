@@ -1,8 +1,15 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", 
+        env_file_encoding="utf-8", 
+        extra="ignore",
+        env_prefix="",  # Не добавлять префикс к переменным окружения
+        case_sensitive=False,  # Игнорировать регистр при чтении переменных
+    )
 
     app_env: str = "local"
     app_debug: bool = True
@@ -21,6 +28,10 @@ class Settings(BaseSettings):
 
     rate_limit_per_minute: int = 60
     rate_limit_window_seconds: int = 60
+
+    # iCloud/CardDAV настройки
+    icloud_mode: str = Field(default="mock", description="Режим работы: 'mock' или 'real'")
+    mock_icloud_url: str = Field(default="http://mock-carddav:8080", description="URL mock CardDAV сервера")
 
 
 settings = Settings()

@@ -13,6 +13,9 @@ from app.schemas.organizations import Organization
 from app.services.audit import log_audit
 from app.services.db import execute, execute_returning_one, fetchall, fetchone
 from app.utils.pagination import decode_cursor, encode_cursor, next_cursor_if_any
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 OWNER_ONLY_FIELDS = {"private_notes", "trust_score", "emotional_balance"}
@@ -479,6 +482,21 @@ def create_contact(conn, ctx: WorkspaceContext, user: UserPrincipal, payload: Co
     _set_contact_tags(conn, ctx.workspace_id, contact_id, payload.tags)
     contact = get_contact(conn, ctx, contact_id)
     log_audit(conn, ctx, user, "contact.create", "contact", contact_id, before=None, after=contact)
+    
+    # Пытаемся создать iCloud контакт автоматически
+    try:
+        from app.services import icloud as icloud_svc
+        icloud_result = icloud_svc.create_icloud_contact_from_crm(conn, ctx, user, contact)
+        if icloud_result and not icloud_result.get("success"):
+            # Если iCloud недоступен, логируем предупреждение, но не прерываем создание CRM контакта
+            logger.warning(
+                f"Failed to create iCloud contact for CRM contact {contact_id}: "
+                f"{icloud_result.get('error', 'Unknown error')}. Requires sync: {icloud_result.get('requires_sync', False)}"
+            )
+    except Exception as e:
+        # Ошибка создания iCloud контакта не должна прерывать создание CRM контакта
+        logger.error(f"Error creating iCloud contact for CRM contact {contact_id}: {e}", exc_info=True)
+    
     conn.commit()
     return contact
 

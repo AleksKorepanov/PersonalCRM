@@ -15,6 +15,9 @@ import StaleContactsPage from './pages/StaleContactsPage'
 import WeekPanelPage from './pages/WeekPanelPage'
 import StrategyPage from './pages/StrategyPage'
 import TimelinePage from './pages/TimelinePage'
+import IPhonePage from './pages/IPhonePage'
+import ICloudContactPage from './pages/ICloudContactPage'
+import SettingsPage from './pages/SettingsPage'
 import { ToastProvider } from './components/ui/Toast'
 import type {
   ApiRequestOptions,
@@ -826,6 +829,38 @@ export default function App() {
         />
         <Route path="/strategy" element={<StrategyPage />} />
         <Route path="/audit" element={<AuditPage role={debugRole} apiRequest={apiRequest} />} />
+        <Route
+          path="/iphone"
+          element={<IPhonePage apiRequest={apiRequest} workspaceId={workspaceId} apiBase={apiBase} />}
+        />
+        <Route
+          path="/iphone/contacts/:contactId"
+          element={
+            <ICloudContactPage
+              apiRequest={apiRequest}
+              workspaceId={workspaceId}
+              loadContact={loadContactById}
+              onCreateContact={async (payload) => {
+                if (!workspaceId) throw new Error(t('workspaceMissing'))
+                return await apiRequest<Contact>('/api/v1/contacts', {
+                  method: 'POST',
+                  body: payload,
+                })
+              }}
+            />
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <SettingsPage
+              apiRequest={apiRequest}
+              workspaceId={workspaceId}
+              role={debugRole}
+              userEmail={me?.user.email || null}
+            />
+          }
+        />
       </Routes>
 
       <div style={{ marginTop: 16, color: '#666' }}>

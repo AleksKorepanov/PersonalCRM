@@ -118,6 +118,12 @@ export default function Layout({
             <NavLink data-testid="nav-audit" to="/audit" style={navLinkStyle}>
               {t('menuAudit')}
             </NavLink>
+            <NavLink data-testid="nav-iphone" to="/iphone" style={navLinkStyle}>
+              {t('menuIPhone')}
+            </NavLink>
+            <NavLink data-testid="nav-settings" to="/settings" style={navLinkStyle}>
+              {t('menuSettings')}
+            </NavLink>
           </nav>
         </aside>
 

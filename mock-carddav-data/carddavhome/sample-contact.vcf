@@ -1,0 +1,12 @@
+BEGIN:VCARD
+VERSION:3.0
+FN:Иван Иванов
+N:Иванов;Иван;;;
+TEL;TYPE=CELL:+79991234567
+TEL;TYPE=WORK:+79991234568
+EMAIL;TYPE=HOME:ivan@example.com
+EMAIL;TYPE=WORK:ivan.ivanov@company.com
+ORG:ООО "Компания"
+TITLE:Менеджер
+NOTE:Тестовый контакт для mock CardDAV сервера
+END:VCARD

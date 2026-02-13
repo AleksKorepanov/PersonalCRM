@@ -1,0 +1,9 @@
+BEGIN:VCARD
+VERSION:3.0
+FN:John Doe
+N:Doe;John;;;
+TEL;TYPE=CELL:+15551234567
+EMAIL;TYPE=HOME:john.doe@example.com
+ORG:Acme Corp
+TITLE:Developer
+END:VCARD
